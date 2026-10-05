@@ -440,10 +440,11 @@ const EXPECTED: &[&str] = &[
     "close Ready",
 ];
 
-/// The folds every build must hand the host: the un-encodable bearer's line at open.
+/// The folds every build must hand the host: the un-encodable bearer's line at open, naming the
+/// bound protocol (none bound here: empty, as 1.5.5's override named none).
 const EXPECTED_FOLDS: &[&str] = &[
     "diag 1 sev=0 authorization credential contains invalid header bytes (ASCII control \
-     character); omitting auth header — upstream will reject with 401",
+     character); omitting auth header — upstream will reject with 401 protocol=",
 ];
 
 fn run(p: &Plugin<Auth>, folds: &Folds) -> (Vec<String>, Vec<String>) {
