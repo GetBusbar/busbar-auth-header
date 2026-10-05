@@ -12,7 +12,7 @@ fn open(
     style: &str,
     credential: Option<&str>,
     settings: &str,
-) -> (Result<Binding, Vec<Refusal>>, Vec<OpenNote>) {
+) -> (Result<Binding, Vec<Refusal>>, Vec<Note>) {
     let mut notes = Vec::new();
     let r = open_binding(
         style,
@@ -76,10 +76,40 @@ fn a_keyless_or_unencodable_credential_presents_nothing() {
     assert!(notes.is_empty());
     let (r, notes) = open(BEARER, Some("sk\r\nx"), "{}");
     assert!(own(r).is_empty());
-    assert_eq!(notes, [OpenNote::Bearer]);
+    assert_eq!(notes, [Note::Bearer(String::new())]);
     let (r, notes) = open(API_KEY, Some("k\u{0}"), "{}");
     assert!(own(r).is_empty());
-    assert_eq!(notes, [OpenNote::Header("api-key".to_string())]);
+    assert_eq!(notes, [Note::Header("api-key".to_string())]);
+}
+
+/// The `protocol` setting is the name a bearer's and a credential-family table's note carry (1.5.5's
+/// `protocol=`); a caller's unpresentable credential raises its note per request, an empty one none.
+#[test]
+fn a_note_names_the_bound_protocol_and_a_callers_credential_raises_its_own() {
+    let (r, notes) = open(BEARER, Some("sk\r\nx"), r#"{"protocol":"twin-bearer"}"#);
+    assert!(own(r).is_empty());
+    assert_eq!(notes, [Note::Bearer("twin-bearer".to_string())]);
+    let families = r#"{"protocol":"twin-fam","families":[{"prefix":"sk-ant-api","header":"x-api-key","trim_start":true},{"prefix":"sk-ant-oat"}],"own":{"header":"x-api-key"}}"#;
+    let (_, notes) = open(API_KEY, Some("sk-ant-oat01-bad\ntoken"), families);
+    assert_eq!(
+        notes,
+        [Note::Family(
+            "twin-fam".to_string(),
+            "authorization".to_string()
+        )]
+    );
+    let (r, notes) = open(API_KEY, None, families);
+    assert!(notes.is_empty());
+    let binding = r.expect("the binding opens keyless");
+    assert!(binding.passthrough("sk-ant-api03-bad\nkey").is_empty());
+    assert_eq!(
+        binding.passthrough_note("sk-ant-api03-bad\nkey"),
+        Some(Note::Family(
+            "twin-fam".to_string(),
+            "x-api-key".to_string()
+        ))
+    );
+    assert_eq!(binding.passthrough_note(""), None);
 }
 
 /// A style with no configured credential still presents the CALLER's, in caller mode
