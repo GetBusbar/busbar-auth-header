@@ -60,6 +60,12 @@ use busbar_contract::abi::sdk::door::{abi_str, statement, Slot};
 use crate::abi::{abi, blob, text};
 use crate::instance::{EnvStore, Header};
 
+thread_local! {
+    /// `fields`' envelope storage, per calling thread: the host copies a call's envelope before it
+    /// makes any other call on that thread, and `fields` is called from many at once.
+    static FIELDS_ENV: std::cell::RefCell<EnvStore> = std::cell::RefCell::default();
+}
+
 /// The flags every field this plugin writes carries: NONE. 1.5.5 sent its credential headers
 /// indexable, and an h2 encoder that honoured `FIELD_SENSITIVE` would send them never-indexed —
 /// different bytes (ARCHITECT ruling 2026-09-28, Q4: the 1.5.5 bytes win; TODO item 583's
@@ -355,7 +361,7 @@ impl Slot for OpenOutbound {
             blob(&input.settings),
             &mut notes,
         );
-        Header::note_open(&mut env, &notes);
+        Header::note(&mut env, &notes);
         let outcome = match opened {
             Ok(binding) => {
                 out.handle = h.keep(binding);
@@ -421,12 +427,29 @@ impl Slot for Fields {
                 let caller = blob(&input.caller_credential)
                     .and_then(|c| std::str::from_utf8(c).ok())
                     .unwrap_or("");
-                let Some(fields) =
-                    h.with_binding(input.handle, |b| (b.passthrough(caller), b.query()))
-                else {
+                let Some((fields, note)) = h.with_binding(input.handle, |b| {
+                    let fields = b.passthrough(caller);
+                    let note = if fields.is_empty() {
+                        b.passthrough_note(caller)
+                    } else {
+                        None
+                    };
+                    ((fields, b.query()), note)
+                }) else {
                     return Outcome::Refused;
                 };
-                write(fields, out)
+                let outcome = write(fields, out);
+                // A caller's credential no header value may carry: 1.5.5 logged its builder's line
+                // on each request that presented it, so this call reports it.
+                if let Some(note) = note {
+                    FIELDS_ENV.with(|env| {
+                        let mut env = env.borrow_mut();
+                        env.clear();
+                        Header::note(&mut env, &[note]);
+                        envelope(&mut out.head, &env);
+                    });
+                }
+                outcome
             }
             _ => Outcome::Refused,
         }

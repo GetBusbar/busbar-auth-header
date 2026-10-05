@@ -12,7 +12,7 @@ use std::sync::{PoisonError, RwLock};
 use busbar_contract::abi::mechanism::call::{AbiStr, Diag};
 
 use crate::abi::abi;
-use crate::style::{Binding, OpenNote};
+use crate::style::{Binding, Note};
 
 /// The index of each diagnostic id in the Statement (`crate::DIAG_IDS`).
 pub(crate) mod diag {
@@ -67,6 +67,12 @@ impl EnvStore {
     /// The diagnostics, as the envelope carries them.
     pub(crate) fn diags(&self) -> &[Diag] {
         &self.diags
+    }
+
+    /// The diagnostics' texts, in order.
+    #[cfg(test)]
+    pub(crate) fn texts(&self) -> &[String] {
+        &self.texts
     }
 }
 
@@ -123,11 +129,13 @@ impl Header {
             .retain(|_, (g, _)| *g != generation);
     }
 
-    /// Report an open's notes into `env`, in the lines 1.5.5's builders logged.
-    pub(crate) fn note_open(env: &mut EnvStore, notes: &[OpenNote]) {
+    /// Report `notes` into `env`, in the lines 1.5.5's builders logged: the message, then the
+    /// line's named values as ` name=value` in 1.5.5's order (`protocol`, then `header`). The host
+    /// writes a declared diagnostic to its main log in that shape (BUSBAR-1.6.0.md #85).
+    pub(crate) fn note(env: &mut EnvStore, notes: &[Note]) {
         for n in notes {
             match n {
-                OpenNote::Header(header) => env.push(
+                Note::Header(header) => env.push(
                     diag::APIKEY_INVALID_BYTES,
                     WARN,
                     format!(
@@ -136,20 +144,22 @@ impl Header {
                          header={header}"
                     ),
                 ),
-                OpenNote::Bearer => env.push(
+                Note::Bearer(protocol) => env.push(
                     diag::AUTH_INVALID_HEADER_BYTES,
                     INFO,
-                    "authorization credential contains invalid header bytes (ASCII control \
-                     character); omitting auth header — upstream will reject with 401"
-                        .to_string(),
+                    format!(
+                        "authorization credential contains invalid header bytes (ASCII control \
+                         character); omitting auth header — upstream will reject with 401 \
+                         protocol={protocol}"
+                    ),
                 ),
-                OpenNote::Family(header) => env.push(
+                Note::Family(protocol, header) => env.push(
                     diag::CREDENTIAL_INVALID_BYTES,
                     WARN,
                     format!(
                         "auth credential contains bytes invalid for an HTTP header value (e.g. a \
                          trailing newline); omitting the credential header — upstream will return \
-                         401, check the key configuration header={header}"
+                         401, check the key configuration protocol={protocol} header={header}"
                     ),
                 ),
             }

@@ -11,13 +11,19 @@
 //!
 //! | style | settings |
 //! |---|---|
-//! | `bearer` | `{families?, own?, passthrough?}` (default: `Bearer` whatever the credential) |
-//! | `api-key` | `{header?: "api-key", families?, own?, passthrough?}` |
-//! | `x-goog-api-key` | `{header?: "x-goog-api-key", families?, own?, passthrough?}` |
+//! | `bearer` | `{families?, own?, passthrough?, protocol?}` (default: `Bearer` whatever the credential) |
+//! | `api-key` | `{header?: "api-key", families?, own?, passthrough?, protocol?}` |
+//! | `x-goog-api-key` | `{header?: "x-goog-api-key", families?, own?, passthrough?, protocol?}` |
 //! | `query-key` | `{param?: "key"}` (the dialect's default parameter name) |
 //!
 //! `families` is a dialect's credential-family table, `[{prefix, header?, trim_start?}]` (a row
 //! without `header` presents as a bearer); `own` / `passthrough` are `{header?, trim_start?}`.
+//! `protocol` is the lane's protocol name, which a bearer's and a credential-family table's
+//! unpresentable-credential line names (1.5.5's `protocol=` field; empty when absent).
+//!
+//! THE NOTES: a credential with bytes no header value may carry presents nothing, and raises the
+//! [`Note`] its 1.5.5 builder logged — the operator's own once, at open (1.5.5 froze that header
+//! once, at boot), a caller's on each request that presents it (1.5.5 built that one per request).
 //!
 //! THE REFUSALS (ARCHITECT ruling 2026-09-28): a binding that cannot open answers FAILED with one
 //! line per finding, each `credential: <text>` or `settings: <text>`. The kernel composes the 1.5.5
@@ -62,24 +68,27 @@ impl Refusal {
     }
 }
 
-/// A credential an open could not present for bytes invalid in a header value, as the diagnostic
-/// it raises.
+/// A credential a binding could not present for bytes invalid in a header value, as the
+/// diagnostic it raises.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum OpenNote {
+pub enum Note {
     /// A static header omitted for invalid bytes (`EGRESS_APIKEY_INVALID_BYTES`), naming the header.
     Header(String),
-    /// A bearer omitted for invalid bytes (`PROTO_AUTH_INVALID_HEADER_BYTES`).
-    Bearer,
-    /// A credential-family table's credential omitted for invalid bytes, naming the header.
-    Family(String),
+    /// A bearer omitted for invalid bytes (`PROTO_AUTH_INVALID_HEADER_BYTES`), naming the protocol.
+    Bearer(String),
+    /// A credential-family table's credential omitted for invalid bytes, naming the protocol, then
+    /// the header.
+    Family(String, String),
 }
 
-/// One open binding: the scheme, and the fields its own credential presents, built once.
+/// One open binding: the scheme, the fields its own credential presents (built once), and the
+/// protocol its notes name.
 #[derive(Debug)]
 pub struct Binding {
     scheme: StaticScheme,
     own: Vec<(String, String)>,
     query: bool,
+    protocol: String,
 }
 
 impl Binding {
@@ -99,6 +108,13 @@ impl Binding {
             return Vec::new();
         }
         self.scheme.present(credential, Mode::Passthrough)
+    }
+
+    /// The note for a caller's `credential` that [`Self::passthrough`] presented as nothing; none
+    /// for an empty one (no credential, nothing to report).
+    pub fn passthrough_note(&self, credential: &str) -> Option<Note> {
+        (!credential.is_empty())
+            .then(|| unpresented(&self.scheme, credential, Mode::Passthrough, &self.protocol))
     }
 }
 
@@ -170,18 +186,18 @@ fn static_scheme(style: &str, m: &Map<String, Value>) -> Result<StaticScheme, Re
 }
 
 /// The note for a credential a static scheme could not present, in the line its builder logged.
-fn unpresented(scheme: &StaticScheme, credential: &str, mode: Mode) -> OpenNote {
+fn unpresented(scheme: &StaticScheme, credential: &str, mode: Mode, protocol: &str) -> Note {
     let p = scheme.presentation(credential, mode);
     let header = p
         .header
         .clone()
         .unwrap_or_else(|| "authorization".to_string());
     if !scheme.families.is_empty() {
-        OpenNote::Family(header)
+        Note::Family(protocol.to_string(), header)
     } else if p.header.is_some() {
-        OpenNote::Header(header)
+        Note::Header(header)
     } else {
-        OpenNote::Bearer
+        Note::Bearer(protocol.to_string())
     }
 }
 
@@ -195,7 +211,7 @@ pub fn open_binding(
     style: &str,
     credential: Option<&[u8]>,
     settings: Option<&[u8]>,
-    notes: &mut Vec<OpenNote>,
+    notes: &mut Vec<Note>,
 ) -> Result<Binding, Vec<Refusal>> {
     let m = object(settings).map_err(|r| vec![r])?;
     let credential_text = match credential.map(std::str::from_utf8) {
@@ -208,6 +224,9 @@ pub fn open_binding(
         }
     };
     let scheme = static_scheme(style, &m).map_err(|r| vec![r])?;
+    let protocol = text(&m, "protocol")
+        .map_err(|r| vec![r])?
+        .unwrap_or_default();
     // NO CREDENTIAL ⇒ NO AUTH HEADER (1.5.5's `prebuild_auth`): an empty key is a keyless upstream
     // (`api_key: none`), and an empty `Authorization: Bearer ` is strictly worse than nothing.
     let credential_text = credential_text.unwrap_or("");
@@ -217,12 +236,13 @@ pub fn open_binding(
         scheme.present(credential_text, Mode::Own)
     };
     if !credential_text.is_empty() && own.is_empty() {
-        notes.push(unpresented(&scheme, credential_text, Mode::Own));
+        notes.push(unpresented(&scheme, credential_text, Mode::Own, &protocol));
     }
     Ok(Binding {
         scheme,
         own,
         query: style == QUERY_KEY,
+        protocol,
     })
 }
 

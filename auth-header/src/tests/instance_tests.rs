@@ -106,18 +106,57 @@ fn retire_drops_the_generations_handles() {
 }
 
 #[test]
-fn note_open_reports_each_note_in_its_own_line() {
+fn note_reports_each_note_in_its_own_line() {
     let mut env = EnvStore::default();
-    Header::note_open(
+    Header::note(
         &mut env,
         &[
-            style::OpenNote::Header("api-key".to_string()),
-            style::OpenNote::Bearer,
-            style::OpenNote::Family("x-api-key".to_string()),
+            style::Note::Header("api-key".to_string()),
+            style::Note::Bearer("twin".to_string()),
+            style::Note::Family("twin".to_string(), "x-api-key".to_string()),
         ],
     );
     assert_eq!(env.diags().len(), 3);
     assert_eq!(env.diags()[0].id_idx, diag::APIKEY_INVALID_BYTES);
     assert_eq!(env.diags()[1].id_idx, diag::AUTH_INVALID_HEADER_BYTES);
     assert_eq!(env.diags()[2].id_idx, diag::CREDENTIAL_INVALID_BYTES);
+    let text = |k: usize| env.texts()[k].clone();
+    assert!(text(0).ends_with("upstream will reject with 401 header=api-key"));
+    assert!(text(1).ends_with("upstream will reject with 401 protocol=twin"));
+    assert!(text(2).ends_with("check the key configuration protocol=twin header=x-api-key"));
+}
+
+/// A caller's credential no header value may carry presents nothing and raises its builder's note
+/// on THAT `fields` call's envelope, per request; a presentable one raises none.
+#[test]
+fn a_callers_unpresentable_credential_is_noted_on_its_fields_call() {
+    let h = Header::new(1);
+    let handle = open(&h, style::BEARER, None, r#"{"protocol":"twin"}"#);
+    let call = |caller: &str| {
+        let mut buf = [0_u8; 512];
+        let mut spans = [FieldSpan {
+            name: auth_span(),
+            value: auth_span(),
+            flags: 0,
+            _reserved: 0,
+        }; 4];
+        let mut i: FieldsIn = crate::abi::zeroed_in();
+        i.handle = handle;
+        i.mode = MODE_PASSTHROUGH;
+        i.caller_credential = Blob {
+            ptr: caller.as_ptr(),
+            len: caller.len(),
+            fmt: BLOB_OCTETS,
+            flags: 0,
+        };
+        (i.field_buf, i.field_buf_cap) = (buf.as_mut_ptr(), buf.len());
+        (i.fields, i.fields_cap) = (spans.as_mut_ptr(), 4);
+        let mut out: FieldsOut = crate::abi::zeroed_out();
+        let inst = std::ptr::from_ref(&h).cast_mut().cast::<c_void>();
+        let outcome = Fields::call(inst, &i, &mut out);
+        (outcome, out.fields_len, out.head.envelope.diags_len)
+    };
+    assert_eq!(call("bad\nkey"), (Outcome::Ready, 0, 1));
+    assert_eq!(call("bad\nkey"), (Outcome::Ready, 0, 1), "every request");
+    assert_eq!(call("good-key"), (Outcome::Ready, 1, 0));
 }
