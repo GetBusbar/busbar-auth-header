@@ -407,7 +407,10 @@ impl Slot for Fields {
         let Some(h) = inst(instance) else {
             return Outcome::Fault;
         };
-        let write = |(fields, query): (Vec<(String, String)>, bool), out: &mut FieldsOut| {
+        // The fields are written into the host's buffer straight from where they are held: the
+        // binding's own, under its read lock, never copied (THE DESIGN §6: "auth material is
+        // zeroised"); a caller's, from the per-request scratch wiped on drop.
+        let write = |fields: &[present::Field], query: bool, out: &mut FieldsOut| {
             let f: Vec<(&str, &str)> = fields
                 .iter()
                 .map(|(n, v)| (n.as_str(), v.as_str()))
@@ -416,18 +419,14 @@ impl Slot for Fields {
             abi::write_fields(input, out, &f, flags)
         };
         match input.mode {
-            MODE_OWN => {
-                let Some(fields) = h.with_binding(input.handle, |b| (b.own().to_vec(), b.query()))
-                else {
-                    return Outcome::Refused;
-                };
-                write(fields, out)
-            }
+            MODE_OWN => h
+                .with_binding(input.handle, |b| write(b.own(), b.query(), out))
+                .unwrap_or(Outcome::Refused),
             MODE_PASSTHROUGH => {
                 let caller = blob(&input.caller_credential)
                     .and_then(|c| std::str::from_utf8(c).ok())
                     .unwrap_or("");
-                let Some((fields, note)) = h.with_binding(input.handle, |b| {
+                let Some(((fields, query), note)) = h.with_binding(input.handle, |b| {
                     let fields = b.passthrough(caller);
                     let note = if fields.is_empty() {
                         b.passthrough_note(caller)
@@ -438,7 +437,7 @@ impl Slot for Fields {
                 }) else {
                     return Outcome::Refused;
                 };
-                let outcome = write(fields, out);
+                let outcome = write(&fields, query, out);
                 // A caller's credential no header value may carry: 1.5.5 logged its builder's line
                 // on each request that presented it, so this call reports it.
                 if let Some(note) = note {

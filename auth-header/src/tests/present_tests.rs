@@ -5,6 +5,18 @@
 //! `declared_tests.rs`: the same vectors, now asserted on the headers the plugin builds.
 
 use super::*;
+
+/// The fields as plain pairs, to compare (test-only; the plugin holds them wiped on drop).
+trait Plain {
+    fn plain(&self) -> Vec<(String, String)>;
+}
+impl Plain for [crate::present::Field] {
+    fn plain(&self) -> Vec<(String, String)> {
+        self.iter()
+            .map(|(n, v)| (n.clone(), v.to_string()))
+            .collect()
+    }
+}
 use busbar_contract::header::is_legal_header_value;
 
 /// Keys, and whether the wire admits them (the `HeaderValue::from_str` rule).
@@ -29,9 +41,11 @@ fn bearer_builder_presents_every_admitted_key_and_omits_the_rest() {
         } else {
             Vec::new()
         };
-        assert_eq!(bearer_auth_headers(key), expected, "key {key:?}");
+        assert_eq!(bearer_auth_headers(key).plain(), expected, "key {key:?}");
         assert_eq!(
-            StaticScheme::uniform(Presentation::BEARER).present(key, Mode::Own),
+            StaticScheme::uniform(Presentation::BEARER)
+                .present(key, Mode::Own)
+                .plain(),
             expected,
             "the bearer style, key {key:?}"
         );
@@ -43,7 +57,7 @@ fn bearer_builder_presents_every_admitted_key_and_omits_the_rest() {
 #[test]
 fn custom_header_builder_presents_the_raw_key_under_its_own_name() {
     for &(key, legal) in KEY_VECTORS {
-        let built = api_key_auth_headers("x-goog-api-key", key);
+        let built = api_key_auth_headers("x-goog-api-key", key).plain();
         let expected = if legal {
             vec![("x-goog-api-key".to_string(), key.to_string())]
         } else {
@@ -51,7 +65,9 @@ fn custom_header_builder_presents_the_raw_key_under_its_own_name() {
         };
         assert_eq!(built, expected, "builder, key {key:?}");
         assert_eq!(
-            StaticScheme::uniform(Presentation::raw("x-goog-api-key")).present(key, Mode::Own),
+            StaticScheme::uniform(Presentation::raw("x-goog-api-key"))
+                .present(key, Mode::Own)
+                .plain(),
             built,
             "the x-goog-api-key style, key {key:?}"
         );
@@ -62,11 +78,15 @@ fn custom_header_builder_presents_the_raw_key_under_its_own_name() {
 #[test]
 fn the_two_custom_header_styles_keep_their_own_names() {
     assert_eq!(
-        StaticScheme::uniform(Presentation::raw("api-key")).present("azure-key-xyz", Mode::Own),
+        StaticScheme::uniform(Presentation::raw("api-key"))
+            .present("azure-key-xyz", Mode::Own)
+            .plain(),
         vec![("api-key".to_string(), "azure-key-xyz".to_string())]
     );
     assert_eq!(
-        StaticScheme::uniform(Presentation::raw("x-goog-api-key")).present("goog-key", Mode::Own),
+        StaticScheme::uniform(Presentation::raw("x-goog-api-key"))
+            .present("goog-key", Mode::Own)
+            .plain(),
         vec![("x-goog-api-key".to_string(), "goog-key".to_string())]
     );
 }
@@ -82,6 +102,7 @@ fn a_custom_header_style_omits_a_key_with_crlf_in_it() {
         assert!(
             StaticScheme::uniform(Presentation::raw(header))
                 .present(secret, Mode::Own)
+                .plain()
                 .is_empty(),
             "{header} put an un-encodable key on the wire"
         );
@@ -130,29 +151,29 @@ fn family_scheme() -> StaticScheme {
 fn a_family_table_presents_by_prefix_then_by_mode() {
     let s = family_scheme();
     assert_eq!(
-        s.present("  sk-ant-api03-abc", Mode::Own),
+        s.present("  sk-ant-api03-abc", Mode::Own).plain(),
         vec![("x-api-key".to_string(), "sk-ant-api03-abc".to_string())],
         "an API key: x-api-key, leading whitespace trimmed"
     );
     assert_eq!(
-        s.present("sk-ant-api03-abc", Mode::Passthrough),
+        s.present("sk-ant-api03-abc", Mode::Passthrough).plain(),
         vec![("x-api-key".to_string(), "sk-ant-api03-abc".to_string())],
         "the family decides whatever the mode"
     );
     assert_eq!(
-        s.present("sk-ant-oat01-xyz", Mode::Own),
+        s.present("sk-ant-oat01-xyz", Mode::Own).plain(),
         vec![(
             "authorization".to_string(),
             "Bearer sk-ant-oat01-xyz".to_string()
         )]
     );
     assert_eq!(
-        s.present("other", Mode::Own),
+        s.present("other", Mode::Own).plain(),
         vec![("x-api-key".to_string(), "other".to_string())],
         "no family, own: the own presentation"
     );
     assert_eq!(
-        s.present("other", Mode::Passthrough),
+        s.present("other", Mode::Passthrough).plain(),
         vec![("authorization".to_string(), "Bearer other".to_string())],
         "no family, a caller's: the passthrough presentation"
     );

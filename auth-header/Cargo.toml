@@ -32,3 +32,5 @@ dropped-in = []
 busbar-contract = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+# Auth material is wiped on drop (BUSBAR-1.6.0.md THE DESIGN §6: "auth material is zeroised").
+zeroize = { workspace = true }
