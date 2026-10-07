@@ -8,6 +8,18 @@
 
 use super::*;
 
+/// The fields as plain pairs, to compare (test-only; the plugin holds them wiped on drop).
+trait Plain {
+    fn plain(&self) -> Vec<(String, String)>;
+}
+impl Plain for [crate::present::Field] {
+    fn plain(&self) -> Vec<(String, String)> {
+        self.iter()
+            .map(|(n, v)| (n.clone(), v.to_string()))
+            .collect()
+    }
+}
+
 fn open(
     style: &str,
     credential: Option<&str>,
@@ -31,7 +43,7 @@ fn lines(r: Result<Binding, Vec<Refusal>>) -> Vec<String> {
 }
 
 fn own(r: Result<Binding, Vec<Refusal>>) -> Vec<(String, String)> {
-    r.expect("the binding opens").own().to_vec()
+    r.expect("the binding opens").own().plain()
 }
 
 /// The static styles build their header ONCE, at open, from the default presentation or the
@@ -101,7 +113,10 @@ fn a_note_names_the_bound_protocol_and_a_callers_credential_raises_its_own() {
     let (r, notes) = open(API_KEY, None, families);
     assert!(notes.is_empty());
     let binding = r.expect("the binding opens keyless");
-    assert!(binding.passthrough("sk-ant-api03-bad\nkey").is_empty());
+    assert!(binding
+        .passthrough("sk-ant-api03-bad\nkey")
+        .plain()
+        .is_empty());
     assert_eq!(
         binding.passthrough_note("sk-ant-api03-bad\nkey"),
         Some(Note::Family(
@@ -118,13 +133,16 @@ fn a_note_names_the_bound_protocol_and_a_callers_credential_raises_its_own() {
 fn a_style_with_no_own_credential_still_presents_the_callers() {
     let (r, _) = open(X_GOOG_API_KEY, None, "{}");
     let binding = r.expect("the binding opens keyless");
-    assert!(binding.own().is_empty(), "no own credential: no own header");
+    assert!(
+        binding.own().plain().is_empty(),
+        "no own credential: no own header"
+    );
     assert_eq!(
-        binding.passthrough("caller-key"),
+        binding.passthrough("caller-key").plain(),
         vec![("x-goog-api-key".to_string(), "caller-key".to_string())]
     );
     assert!(
-        binding.passthrough("").is_empty(),
+        binding.passthrough("").plain().is_empty(),
         "a tokenless caller: no header"
     );
 }
@@ -136,7 +154,7 @@ fn passthrough_honours_the_family_table_too() {
     let (r, _) = open(API_KEY, None, table);
     let binding = r.expect("the binding opens");
     assert_eq!(
-        binding.passthrough("sk-ant-oat01-xyz"),
+        binding.passthrough("sk-ant-oat01-xyz").plain(),
         vec![(
             "authorization".to_string(),
             "Bearer sk-ant-oat01-xyz".to_string()
@@ -144,7 +162,7 @@ fn passthrough_honours_the_family_table_too() {
         "the family wins over the passthrough default"
     );
     assert_eq!(
-        binding.passthrough("other"),
+        binding.passthrough("other").plain(),
         vec![("x-api-key".to_string(), "other".to_string())]
     );
 }
@@ -177,15 +195,18 @@ fn an_unknown_style_or_malformed_settings_is_refused() {
 fn the_query_style_presents_a_query_parameter() {
     let b = open(QUERY_KEY, Some("gem-1"), "{}").0.expect("opens");
     assert!(b.query());
-    assert_eq!(b.own(), &[("key".to_string(), "gem-1".to_string())]);
+    assert_eq!(b.own().plain(), &[("key".to_string(), "gem-1".to_string())]);
     assert_eq!(
-        b.passthrough("caller-1"),
+        b.passthrough("caller-1").plain(),
         vec![("key".to_string(), "caller-1".to_string())]
     );
     let named = open(QUERY_KEY, Some("gem-1"), r#"{"param":"api_key"}"#)
         .0
         .expect("opens");
-    assert_eq!(named.own(), &[("api_key".to_string(), "gem-1".to_string())]);
+    assert_eq!(
+        named.own().plain(),
+        &[("api_key".to_string(), "gem-1".to_string())]
+    );
     for style in [BEARER, API_KEY, X_GOOG_API_KEY] {
         assert!(
             !open(style, Some("k"), "{}").0.expect("opens").query(),

@@ -47,6 +47,7 @@ dependencies = [
  "busbar-contract",
  "serde",
  "serde_json",
+ "zeroize",
 ]
 
 [[package]]

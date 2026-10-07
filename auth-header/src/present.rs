@@ -18,25 +18,33 @@
 
 use busbar_contract::header::{is_legal_header_value, token_value};
 use serde::Deserialize;
+use zeroize::Zeroizing;
+
+/// One presented field: its name and its value, the value (credential material) wiped on drop
+/// (BUSBAR-1.6.0.md THE DESIGN §6: "auth material is zeroised").
+pub type Field = (String, Zeroizing<String>);
 
 /// The static bearer credential: `authorization: Bearer <key>`, or NO header when the key carries a
 /// byte that is not a legal header value (the upstream then answers 401). The omission is the whole
 /// policy; reporting it is the caller's ([`crate::envelope`]), and the key is never logged.
-pub fn bearer_auth_headers(key: &str) -> Vec<(String, String)> {
+pub fn bearer_auth_headers(key: &str) -> Vec<Field> {
     if !is_legal_header_value(key) {
         return Vec::new();
     }
-    vec![("authorization".to_string(), token_value(key))]
+    vec![(
+        "authorization".to_string(),
+        Zeroizing::new(token_value(key)),
+    )]
 }
 
 /// The static custom-header credential (`api-key`, `x-goog-api-key`, …) carrying the raw key
 /// verbatim, or NO header when the key carries a byte that is not a legal header value. `header` is
 /// the lowercase header name the style presents under.
-pub fn api_key_auth_headers(header: &str, key: &str) -> Vec<(String, String)> {
+pub fn api_key_auth_headers(header: &str, key: &str) -> Vec<Field> {
     if !is_legal_header_value(key) {
         return Vec::new();
     }
-    vec![(header.to_string(), key.to_string())]
+    vec![(header.to_string(), Zeroizing::new(key.to_string()))]
 }
 
 /// How one static credential is presented (the contract's `CredentialHeader`, as settings data):
@@ -129,7 +137,7 @@ impl StaticScheme {
 
     /// Present `credential` in `mode`: the header pairs to attach, or NONE when the credential
     /// cannot be presented (a byte that is not a legal header value).
-    pub fn present(&self, credential: &str, mode: Mode) -> Vec<(String, String)> {
+    pub fn present(&self, credential: &str, mode: Mode) -> Vec<Field> {
         match self.presentation(credential, mode) {
             Presentation {
                 header: Some(header),

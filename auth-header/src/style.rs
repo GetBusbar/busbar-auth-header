@@ -86,7 +86,7 @@ pub enum Note {
 #[derive(Debug)]
 pub struct Binding {
     scheme: StaticScheme,
-    own: Vec<(String, String)>,
+    own: Vec<crate::present::Field>,
     query: bool,
     protocol: String,
 }
@@ -98,12 +98,12 @@ impl Binding {
     }
 
     /// The fields the binding's own credential presents (empty: no header) — [`Mode::Own`].
-    pub fn own(&self) -> &[(String, String)] {
+    pub fn own(&self) -> &[crate::present::Field] {
         &self.own
     }
 
     /// The fields a caller's credential presents — [`Mode::Passthrough`].
-    pub fn passthrough(&self, credential: &str) -> Vec<(String, String)> {
+    pub fn passthrough(&self, credential: &str) -> Vec<crate::present::Field> {
         if credential.is_empty() {
             return Vec::new();
         }
