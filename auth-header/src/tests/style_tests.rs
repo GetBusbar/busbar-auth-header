@@ -197,3 +197,27 @@ fn the_query_style_presents_a_query_parameter() {
         "no credential, no parameter"
     );
 }
+
+/// The type a value is held as.
+fn held_as<T>(_: &T) -> &'static str {
+    std::any::type_name::<T>()
+}
+
+/// RED (BUSBAR-1.6.0.md THE DESIGN §6, the per-request auth call: "auth material is zeroised"):
+/// the operator's credential a binding holds for its life, and a caller's credential presented
+/// per request, are held in buffers wiped on drop, never plain strings.
+#[test]
+fn held_and_presented_credentials_are_wiped_on_drop() {
+    let binding = open(BEARER, Some("operator-key"), "{}")
+        .0
+        .expect("the binding opens");
+    let own = &binding.own()[0].1;
+    assert!(held_as(own).contains("Zeroizing"), "own: {}", held_as(own));
+    let caller = binding.passthrough("caller-key");
+    let caller = &caller[0].1;
+    assert!(
+        held_as(caller).contains("Zeroizing"),
+        "passthrough: {}",
+        held_as(caller)
+    );
+}
