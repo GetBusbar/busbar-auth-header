@@ -6,8 +6,10 @@
 
 use super::*;
 use crate::style;
-use crate::Fields;
-use busbar_contract::abi::auth::{FieldSpan, FieldsIn, FieldsOut, MODE_OWN, MODE_PASSTHROUGH};
+use crate::{Fields, OpenOutbound};
+use busbar_contract::abi::auth::{
+    FieldSpan, FieldsIn, FieldsOut, OpenOutboundIn, OpenOutboundOut, MODE_OWN, MODE_PASSTHROUGH,
+};
 use busbar_contract::abi::mechanism::call::{Blob, Outcome, BLOB_OCTETS};
 use busbar_contract::abi::sdk::door::Slot;
 use std::ffi::c_void;
@@ -159,4 +161,100 @@ fn a_callers_unpresentable_credential_is_noted_on_its_fields_call() {
     assert_eq!(call("bad\nkey"), (Outcome::Ready, 0, 1));
     assert_eq!(call("bad\nkey"), (Outcome::Ready, 0, 1), "every request");
     assert_eq!(call("good-key"), (Outcome::Ready, 1, 0));
+}
+
+/// One `open_outbound` through the slot body on `h`, as the trampoline makes it; the answer's
+/// `out`, whose envelope the host reads AFTER the call returns.
+fn open_slot(h: &Header, style: &str, cred: &str, settings: &str) -> OpenOutboundOut {
+    let mut i: OpenOutboundIn = crate::abi::zeroed_in();
+    i.style = crate::abi::abi(style);
+    i.credential = Blob {
+        ptr: cred.as_ptr(),
+        len: cred.len(),
+        fmt: BLOB_OCTETS,
+        flags: 0,
+    };
+    i.settings = Blob {
+        ptr: settings.as_ptr(),
+        len: settings.len(),
+        fmt: BLOB_OCTETS,
+        flags: 0,
+    };
+    let mut out: OpenOutboundOut = crate::abi::zeroed_out();
+    let inst = std::ptr::from_ref(h).cast_mut().cast::<c_void>();
+    assert_eq!(OpenOutbound::call(inst, &i, &mut out), Outcome::Ready);
+    out
+}
+
+/// The `x-goog-api-key` binding's settings and the `api-key` one's: each names its own header.
+const GOOG: &str = r#"{"header":"x-goog-api-key"}"#;
+const API_KEY: &str = r#"{"header":"api-key"}"#;
+
+fn header_line(header: &str) -> String {
+    format!(
+        "egress credential contains invalid header bytes (ASCII control character); omitting \
+         auth header — upstream will reject with 401 header={header}"
+    )
+}
+
+/// ONE INSTANCE, OPENED FROM TWO THREADS: an `open_outbound`'s envelope is that call's own until
+/// its thread's next op. A second thread opening the same instance in between — the process's one
+/// instance per style, every build binding through it — does not rewrite what the first call
+/// answered. RED with the envelope storage on the instance: the first thread reads the second's
+/// line (`header=api-key`), or the second's shorter text over the first's length
+/// (`header=api-keyapi-key`).
+#[test]
+fn an_open_outbound_envelope_is_its_own_while_another_thread_opens_the_instance() {
+    let h = Header::new(1);
+    let (opened, go) = (std::sync::Barrier::new(2), std::sync::Barrier::new(2));
+    std::thread::scope(|s| {
+        let first = s.spawn(|| {
+            let out = open_slot(&h, style::API_KEY, "bad\nkey", GOOG);
+            opened.wait();
+            go.wait();
+            crate::abi::envelope_texts(&out.head)
+        });
+        opened.wait();
+        let second = open_slot(&h, style::API_KEY, "bad\nkey", API_KEY);
+        assert_eq!(
+            crate::abi::envelope_texts(&second.head),
+            vec![header_line("api-key")]
+        );
+        go.wait();
+        assert_eq!(
+            first.join().expect("the first thread"),
+            vec![header_line("x-goog-api-key")]
+        );
+    });
+}
+
+/// N threads opening ONE instance at once, each reading its own answer's envelope as the host
+/// does: every line names exactly the header its own binding was opened under.
+#[test]
+fn parallel_opens_of_one_instance_each_read_their_own_header_line() {
+    const THREADS: usize = 16;
+    const ROUNDS: usize = 200;
+    let h = Header::new(1);
+    let start = std::sync::Barrier::new(THREADS);
+    std::thread::scope(|s| {
+        for t in 0..THREADS {
+            let (h, start) = (&h, &start);
+            s.spawn(move || {
+                start.wait();
+                for r in 0..ROUNDS {
+                    let (settings, header) = if (t + r) % 2 == 0 {
+                        (GOOG, "x-goog-api-key")
+                    } else {
+                        (API_KEY, "api-key")
+                    };
+                    let out = open_slot(h, style::API_KEY, "bad\nkey", settings);
+                    assert_eq!(
+                        crate::abi::envelope_texts(&out.head),
+                        vec![header_line(header)],
+                        "thread {t} round {r}"
+                    );
+                }
+            });
+        }
+    });
 }

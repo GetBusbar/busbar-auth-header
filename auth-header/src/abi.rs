@@ -114,6 +114,24 @@ fn put(input: &FieldsIn, at: &mut usize, b: &[u8]) -> Span {
     span
 }
 
+/// The diagnostics' texts an answered `head` points at, read as the host reads them (the unit
+/// tests read an envelope back as a host does).
+#[cfg(test)]
+pub(crate) fn envelope_texts(head: &busbar_contract::abi::mechanism::call::OutHead) -> Vec<String> {
+    let e = &head.envelope;
+    if e.diags.is_null() {
+        return Vec::new();
+    }
+    // SAFETY: the plugin answered `diags_len` diagnostics at `diags`, valid until the next op on the
+    // calling thread (the mechanism's memory class (iii)); the caller reads them on that thread
+    // before it makes another.
+    let diags = unsafe { std::slice::from_raw_parts(e.diags, e.diags_len) };
+    diags
+        .iter()
+        .map(|d| text(&d.text).unwrap_or_default().to_string())
+        .collect()
+}
+
 /// An all-zero `in` (the unit tests build frames as a host does).
 #[cfg(test)]
 pub(crate) fn zeroed_in<T: busbar_contract::abi::sdk::door::AbiIn>() -> T {
