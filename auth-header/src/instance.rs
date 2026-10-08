@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2026 Busbar Inc and contributors
 
-//! ONE INSTANCE: the handles (generation data), and the per-op envelope storage the host copies
-//! after each control-lane call. No token cache, no waker, no waiting tickets: a header binding
-//! never mints and never pends.
+//! ONE INSTANCE: the handles (generation data). No token cache, no waker, no waiting tickets: a
+//! header binding never mints and never pends.
+//!
+//! The per-call envelope storage is NOT here: one instance serves every thread at once, and the
+//! envelope the host reads after a call returns must be that call's own, so it is kept per calling
+//! thread ([`EnvStore`], `crate::OPEN_ENV` / `crate::FIELDS_ENV`).
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -29,7 +32,11 @@ const INFO: u8 = 0;
 const WARN: u8 = 1;
 
 /// One op's envelope storage: the diagnostics and the texts they point into, kept until the next
-/// call of the same op (the host copies them before it makes any other call on that thread).
+/// call of the same op ON THE SAME THREAD — the host copies a call's envelope before it makes any
+/// other call on that thread (the mechanism's memory class (iii), `Ticket::NONE`), so storage per
+/// calling thread is never rewritten under a reader. Storage shared by the instance would be: a
+/// second thread's call clears and refills it while the first call's host is still reading the
+/// pointers it was answered.
 #[derive(Default)]
 pub(crate) struct EnvStore {
     texts: Vec<String>,
@@ -81,8 +88,6 @@ pub(crate) struct Header {
     generation: AtomicU64,
     next_handle: AtomicU64,
     handles: RwLock<HashMap<u64, (u64, Binding)>>,
-    /// `open_outbound`'s envelope and error.
-    pub(crate) open_env: std::sync::Mutex<EnvStore>,
 }
 
 impl Header {
@@ -92,7 +97,6 @@ impl Header {
             generation: AtomicU64::new(generation),
             next_handle: AtomicU64::new(1),
             handles: RwLock::new(HashMap::new()),
-            open_env: std::sync::Mutex::default(),
         }
     }
 

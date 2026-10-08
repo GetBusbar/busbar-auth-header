@@ -61,6 +61,10 @@ use crate::abi::{abi, blob, text};
 use crate::instance::{EnvStore, Header};
 
 thread_local! {
+    /// `open_outbound`'s envelope and error storage, per calling thread: the host copies a call's
+    /// envelope before it makes any other call on that thread, and one instance is opened from many
+    /// at once (the process's one instance per style, every build binding through it).
+    static OPEN_ENV: std::cell::RefCell<EnvStore> = std::cell::RefCell::default();
     /// `fields`' envelope storage, per calling thread: the host copies a call's envelope before it
     /// makes any other call on that thread, and `fields` is called from many at once.
     static FIELDS_ENV: std::cell::RefCell<EnvStore> = std::cell::RefCell::default();
@@ -344,41 +348,47 @@ impl Slot for OpenOutbound {
         let Some(h) = inst(instance) else {
             return Outcome::Fault;
         };
-        let mut env = h
-            .open_env
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        env.clear();
-        let Some(style) = text(&input.style) else {
-            env.error = "settings: no outbound auth style was named".to_string();
-            envelope(&mut out.head, &env);
-            return Outcome::Refused;
-        };
-        let mut notes = Vec::new();
-        let opened = style::open_binding(
-            style,
-            blob(&input.credential),
-            blob(&input.settings),
-            &mut notes,
-        );
-        Header::note(&mut env, &notes);
-        let outcome = match opened {
-            Ok(binding) => {
-                out.handle = h.keep(binding);
-                Outcome::Ready
-            }
-            Err(refusals) => {
-                env.error = refusals
-                    .iter()
-                    .map(style::Refusal::line)
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                Outcome::Failed
-            }
-        };
-        envelope(&mut out.head, &env);
-        outcome
+        OPEN_ENV.with(|env| open_outbound(h, input, out, &mut env.borrow_mut()))
     }
+}
+
+/// `open_outbound`'s body, its envelope and error written into `env` (this thread's).
+fn open_outbound(
+    h: &Header,
+    input: &OpenOutboundIn,
+    out: &mut OpenOutboundOut,
+    env: &mut EnvStore,
+) -> Outcome {
+    env.clear();
+    let Some(style) = text(&input.style) else {
+        env.error = "settings: no outbound auth style was named".to_string();
+        envelope(&mut out.head, env);
+        return Outcome::Refused;
+    };
+    let mut notes = Vec::new();
+    let opened = style::open_binding(
+        style,
+        blob(&input.credential),
+        blob(&input.settings),
+        &mut notes,
+    );
+    Header::note(env, &notes);
+    let outcome = match opened {
+        Ok(binding) => {
+            out.handle = h.keep(binding);
+            Outcome::Ready
+        }
+        Err(refusals) => {
+            env.error = refusals
+                .iter()
+                .map(style::Refusal::line)
+                .collect::<Vec<_>>()
+                .join("\n");
+            Outcome::Failed
+        }
+    };
+    envelope(&mut out.head, env);
+    outcome
 }
 
 /// `outbound_ready`: always ready — a header binding never mints.
