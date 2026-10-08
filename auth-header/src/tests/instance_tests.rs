@@ -163,9 +163,16 @@ fn a_callers_unpresentable_credential_is_noted_on_its_fields_call() {
     assert_eq!(call("good-key"), (Outcome::Ready, 1, 0));
 }
 
-/// One `open_outbound` through the slot body on `h`, as the trampoline makes it; the answer's
-/// `out`, whose envelope the host reads AFTER the call returns.
-fn open_slot(h: &Header, style: &str, cred: &str, settings: &str) -> OpenOutboundOut {
+/// The instance pointer as the host holds it: one address, called from any thread (an address,
+/// so the cells share the instance exactly as the host does, whatever the instance's own types
+/// promise about sharing).
+fn instance_addr(h: &Header) -> usize {
+    std::ptr::from_ref(h) as usize
+}
+
+/// One `open_outbound` through the slot body on the instance at `inst`, as the trampoline makes
+/// it; the answer's `out`, whose envelope the host reads AFTER the call returns.
+fn open_slot(inst: usize, style: &str, cred: &str, settings: &str) -> OpenOutboundOut {
     let mut i: OpenOutboundIn = crate::abi::zeroed_in();
     i.style = crate::abi::abi(style);
     i.credential = Blob {
@@ -181,8 +188,10 @@ fn open_slot(h: &Header, style: &str, cred: &str, settings: &str) -> OpenOutboun
         flags: 0,
     };
     let mut out: OpenOutboundOut = crate::abi::zeroed_out();
-    let inst = std::ptr::from_ref(h).cast_mut().cast::<c_void>();
-    assert_eq!(OpenOutbound::call(inst, &i, &mut out), Outcome::Ready);
+    assert_eq!(
+        OpenOutbound::call(inst as *mut c_void, &i, &mut out),
+        Outcome::Ready
+    );
     out
 }
 
@@ -206,16 +215,17 @@ fn header_line(header: &str) -> String {
 #[test]
 fn an_open_outbound_envelope_is_its_own_while_another_thread_opens_the_instance() {
     let h = Header::new(1);
+    let inst = instance_addr(&h);
     let (opened, go) = (std::sync::Barrier::new(2), std::sync::Barrier::new(2));
     std::thread::scope(|s| {
         let first = s.spawn(|| {
-            let out = open_slot(&h, style::API_KEY, "bad\nkey", GOOG);
+            let out = open_slot(inst, style::API_KEY, "bad\nkey", GOOG);
             opened.wait();
             go.wait();
             crate::abi::envelope_texts(&out.head)
         });
         opened.wait();
-        let second = open_slot(&h, style::API_KEY, "bad\nkey", API_KEY);
+        let second = open_slot(inst, style::API_KEY, "bad\nkey", API_KEY);
         assert_eq!(
             crate::abi::envelope_texts(&second.head),
             vec![header_line("api-key")]
@@ -235,10 +245,11 @@ fn parallel_opens_of_one_instance_each_read_their_own_header_line() {
     const THREADS: usize = 16;
     const ROUNDS: usize = 200;
     let h = Header::new(1);
+    let inst = instance_addr(&h);
     let start = std::sync::Barrier::new(THREADS);
     std::thread::scope(|s| {
         for t in 0..THREADS {
-            let (h, start) = (&h, &start);
+            let start = &start;
             s.spawn(move || {
                 start.wait();
                 for r in 0..ROUNDS {
@@ -247,7 +258,7 @@ fn parallel_opens_of_one_instance_each_read_their_own_header_line() {
                     } else {
                         (API_KEY, "api-key")
                     };
-                    let out = open_slot(h, style::API_KEY, "bad\nkey", settings);
+                    let out = open_slot(inst, style::API_KEY, "bad\nkey", settings);
                     assert_eq!(
                         crate::abi::envelope_texts(&out.head),
                         vec![header_line(header)],
