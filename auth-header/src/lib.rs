@@ -91,3 +91,7 @@ pub mod compiled_in {
         pub use crate::door;
     }
 }
+
+#[cfg(test)]
+#[path = "tests/statement_tests.rs"]
+mod statement_tests;
