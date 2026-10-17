@@ -31,7 +31,8 @@
 //! under the short-buffer rule and keeps every answer's memory in the answering instance, so this
 //! crate is `#![forbid(unsafe_code)]` and holds no per-thread or process-global state (THE DESIGN
 //! §2). The inbound operations (`verify`, the login pair) are not served and answer REFUSED (the
-//! tail declares only `CAP_OUTBOUND`).
+//! tail declares only `CAP_OUTBOUND`). Its Statement also states the host's default inbound style:
+//! the lines a caller's credential sits on (busbar row 159, K3#1).
 
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
@@ -40,10 +41,12 @@ mod instance;
 mod present;
 mod style;
 
-use busbar_contract::abi::auth::{AuthPoints, AuthTail, StyleDecl, STYLE_CALLER_CREDENTIAL};
+use busbar_contract::abi::auth::{
+    AuthPoints, AuthTail, StyleDecl, FACT_DEFAULT_INBOUND_STYLE, STYLE_CALLER_CREDENTIAL,
+};
 use busbar_contract::abi::mechanism::call::AbiStr;
-use busbar_contract::abi::mechanism::door::Statement;
-use busbar_contract::abi::sdk::auth_door::with_tail;
+use busbar_contract::abi::mechanism::door::{MarkWord, Statement};
+use busbar_contract::abi::sdk::auth_door::{carrier, with_tail};
 use busbar_contract::abi::sdk::auth_outbound::{outbound_tail, style as declare};
 use busbar_contract::abi::sdk::door::{abi_str, statement};
 
@@ -60,8 +63,23 @@ const STYLE_DECLS: &[StyleDecl] = &[
     declare(style::QUERY_KEY, STYLE_CALLER_CREDENTIAL, AuthPoints::HEAD),
 ];
 
-/// THE AUTH STATEMENT TAIL: outbound only, no login, no inbound carriers.
-const TAIL: &AuthTail = &outbound_tail(0, STYLE_DECLS);
+/// THE HOST'S DEFAULT INBOUND STYLE's lines (busbar row 159, K3#1): where a caller's credential sits
+/// on every line the operator's config leaves without a style, in 1.5.5's precedence order: the
+/// Bearer on `authorization`, then the raw key on `x-api-key` (the Anthropic SDK's line), then on
+/// `x-goog-api-key` (the Gemini SDK's). The host walks them in this order and strips all three from
+/// what a plane sees; busbar's core names none of them.
+const CARRIER_LINES: [&str; 3] = ["authorization", "x-api-key", "x-goog-api-key"];
+
+/// [`CARRIER_LINES`] as the Statement's carrier word marks.
+const CARRIERS: [MarkWord; 3] = [
+    carrier(CARRIER_LINES[0]),
+    carrier(CARRIER_LINES[1]),
+    carrier(CARRIER_LINES[2]),
+];
+
+/// THE AUTH STATEMENT TAIL: outbound styles, no login, and the host's default inbound style (the
+/// Statement's carrier marks, [`CARRIERS`]); `verify` is not served.
+const TAIL: &AuthTail = &outbound_tail(FACT_DEFAULT_INBOUND_STYLE, STYLE_DECLS);
 
 /// The diagnostic ids, in `instance::diag` order: 1.5.5's catalog codes where the line had one.
 const DIAG_IDS: &[AbiStr] = &[
@@ -75,6 +93,8 @@ const STATEMENT: Statement = with_tail(
     Statement {
         diag_ids: DIAG_IDS.as_ptr(),
         diag_ids_len: DIAG_IDS.len(),
+        mark_words: CARRIERS.as_ptr(),
+        mark_words_len: CARRIERS.len(),
         ..statement("busbar-auth-header", env!("CARGO_PKG_VERSION"), 1024)
     },
     TAIL,
@@ -91,3 +111,7 @@ pub mod compiled_in {
         pub use crate::door;
     }
 }
+
+#[cfg(test)]
+#[path = "tests/statement_tests.rs"]
+mod statement_tests;
