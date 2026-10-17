@@ -7,8 +7,7 @@
 //! `presentation`/`present`), staged `busbar-auth-outbound::present` (KERNEL<>PLUGINS step 22), then
 //! here (AUTH-SPLIT: bearer/api-key/x-goog-api-key are one mechanism, header presentation, and this
 //! is its own crate). The legality rule itself, [`is_legal_header_value`](busbar_contract::header::is_legal_header_value),
-//! lives in `busbar-contract` now, a shared pure helper: `busbar-auth-sigv4` and
-//! `busbar-auth-oauth` need the same byte rule.
+//! lives in `busbar-contract` now, a shared pure helper the auth kind's mechanisms use alike.
 //!
 //! What did NOT move: the `Grant<Sign>` / `SecretSlot` / `substitute` indirection. It existed so the
 //! kernel could write a secret onto a request without a plane ever holding it; the auth plugin
@@ -135,6 +134,44 @@ impl StaticScheme {
             })
     }
 
+    /// Present `credential` in `mode` BY REFERENCE, the per-request path (THE DESIGN §11.2: "no
+    /// allocation and no blocking on the hot path"): `emit(name, value)` once, with the bytes
+    /// [`Self::present`] builds, or never when the credential cannot be presented. A raw value is
+    /// the credential's own bytes; a bearer value is staged on the stack (wiped when it drops) up
+    /// to [`STACK_VALUE`] bytes, in a zeroised heap buffer only past that. Answers whether it
+    /// emitted.
+    pub fn present_with(
+        &self,
+        credential: &str,
+        mode: Mode,
+        emit: impl FnOnce(&[u8], &[u8]),
+    ) -> bool {
+        match self.presentation(credential, mode) {
+            Presentation {
+                header: Some(header),
+                trim_start,
+            } => {
+                let key = if *trim_start {
+                    credential.trim_start()
+                } else {
+                    credential
+                };
+                if !is_legal_header_value(key) {
+                    return false;
+                }
+                emit(header.as_bytes(), key.as_bytes());
+                true
+            }
+            Presentation { header: None, .. } => {
+                if !is_legal_header_value(credential) {
+                    return false;
+                }
+                with_bearer(credential, |value| emit(b"authorization", value));
+                true
+            }
+        }
+    }
+
     /// Present `credential` in `mode`: the header pairs to attach, or NONE when the credential
     /// cannot be presented (a byte that is not a legal header value).
     pub fn present(&self, credential: &str, mode: Mode) -> Vec<Field> {
@@ -152,6 +189,29 @@ impl StaticScheme {
             ),
             Presentation { header: None, .. } => bearer_auth_headers(credential),
         }
+    }
+}
+
+/// The longest bearer value [`StaticScheme::present_with`] stages on the stack.
+pub const STACK_VALUE: usize = 1024;
+
+/// The bearer scheme's prefix, as [`token_value`] writes it.
+const BEARER_PREFIX: &[u8] = b"Bearer ";
+
+/// Run `f` over `Bearer <key>` (the bytes [`token_value`] builds), staged on the stack when it
+/// fits [`STACK_VALUE`], else in a heap buffer; either is wiped when it drops.
+fn with_bearer(key: &str, f: impl FnOnce(&[u8])) {
+    let len = BEARER_PREFIX.len() + key.len();
+    if len <= STACK_VALUE {
+        let mut buf = Zeroizing::new([0_u8; STACK_VALUE]);
+        buf[..BEARER_PREFIX.len()].copy_from_slice(BEARER_PREFIX);
+        buf[BEARER_PREFIX.len()..len].copy_from_slice(key.as_bytes());
+        f(&buf[..len]);
+    } else {
+        let mut value = Zeroizing::new(Vec::with_capacity(len));
+        value.extend_from_slice(BEARER_PREFIX);
+        value.extend_from_slice(key.as_bytes());
+        f(&value);
     }
 }
 

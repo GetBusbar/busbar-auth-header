@@ -83,12 +83,22 @@ pub enum Note {
 
 /// One open binding: the scheme, the fields its own credential presents (built once), and the
 /// protocol its notes name.
-#[derive(Debug)]
 pub struct Binding {
     scheme: StaticScheme,
     own: Vec<crate::present::Field>,
     query: bool,
     protocol: String,
+}
+
+impl std::fmt::Debug for Binding {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Never the presented values: they are credential material.
+        f.debug_struct("Binding")
+            .field("own", &self.own.len())
+            .field("query", &self.query)
+            .field("protocol", &self.protocol)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Binding {
@@ -102,7 +112,19 @@ impl Binding {
         &self.own
     }
 
-    /// The fields a caller's credential presents — [`Mode::Passthrough`].
+    /// Present a caller's `credential` by reference — [`Mode::Passthrough`], the per-request path:
+    /// `emit(name, value)` once, or never (no credential, or one that cannot be presented).
+    /// Answers whether it emitted.
+    pub fn present_passthrough(&self, credential: &str, emit: impl FnOnce(&[u8], &[u8])) -> bool {
+        !credential.is_empty()
+            && self
+                .scheme
+                .present_with(credential, Mode::Passthrough, emit)
+    }
+
+    /// The fields a caller's credential presents — [`Mode::Passthrough`], as owned fields (what
+    /// [`Self::present_passthrough`] emits by reference).
+    #[cfg(test)]
     pub fn passthrough(&self, credential: &str) -> Vec<crate::present::Field> {
         if credential.is_empty() {
             return Vec::new();
