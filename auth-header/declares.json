@@ -12,6 +12,15 @@
       "summary": "A configured static egress credential contains bytes that are invalid in an HTTP header value (an ASCII control character, such as a trailing newline), so the plugin omits the auth header and the upstream rejects the request with 401. It is raised on each request that would have carried the header.",
       "action": "Fix the credential's configured value (strip the control character, often a trailing newline from a file or env source). Egress to that upstream 401s until it is fixed.",
       "since": "1.6.0"
+    },
+    {
+      "code": 4030,
+      "slug": "credential-invalid-bytes",
+      "title": "Auth credential contains invalid header bytes (credential header omitted)",
+      "severity": "actionable",
+      "summary": "A credential from a credential-family table contains bytes invalid in an HTTP header value (for example a trailing newline), so the plugin omits the credential header and the upstream returns 401. It is raised on each request that would have carried the header, naming the protocol and the header.",
+      "action": "Fix the credential's configured value (strip the control character, often a trailing newline from a file or env source). Egress to that upstream 401s until it is fixed.",
+      "since": "1.6.0"
     }
   ]
 }
