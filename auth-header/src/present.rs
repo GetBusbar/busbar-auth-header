@@ -25,7 +25,7 @@ pub type Field = (String, Zeroizing<String>);
 
 /// The static bearer credential: `authorization: Bearer <key>`, or NO header when the key carries a
 /// byte that is not a legal header value (the upstream then answers 401). The omission is the whole
-/// policy; reporting it is the caller's ([`crate::envelope`]), and the key is never logged.
+/// policy; reporting it is the caller's ([`crate::instance::note_line`]), and the key is never logged.
 pub fn bearer_auth_headers(key: &str) -> Vec<Field> {
     if !is_legal_header_value(key) {
         return Vec::new();
