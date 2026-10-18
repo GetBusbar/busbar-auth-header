@@ -6,7 +6,8 @@
 //! BUSBAR-1.6.0.md THE DESIGN, §6 (OWNER-LOCKED 2026-09-27, split by mechanism per ARCHITECT ruling 2026-09-29):
 //! *"bearer"*, *"api-key"* and *"x-goog-api-key"* are ONE mechanism — a credential presented
 //! verbatim in an HTTP header, either the `authorization` bearer scheme or a raw custom header —
-//! and live in one plugin, `busbar-auth-header`, loaded when some provider uses one of them. It
+//! and live in one plugin, `busbar-auth-header`, loaded when some provider uses one of them. Its
+//! fourth style, *"query-key"*, presents the credential verbatim as a query parameter instead. It
 //! speaks the auth kind's memory ABI (`busbar_contract::abi::auth`, v3):
 //!
 //! * `open_outbound` binds one style to its credential and settings and answers a handle
