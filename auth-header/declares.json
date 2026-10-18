@@ -2,5 +2,16 @@
   "contract_abi": {
     "min": 3,
     "max": 3
-  }
+  },
+  "diagnostics": [
+    {
+      "code": 4013,
+      "slug": "egress-apikey-invalid-bytes",
+      "title": "Egress API key contains invalid header bytes (auth header omitted)",
+      "severity": "actionable",
+      "summary": "A configured static egress credential contains bytes that are invalid in an HTTP header value (an ASCII control character, such as a trailing newline), so the plugin omits the auth header and the upstream rejects the request with 401. It is raised on each request that would have carried the header.",
+      "action": "Fix the credential's configured value (strip the control character, often a trailing newline from a file or env source). Egress to that upstream 401s until it is fixed.",
+      "since": "1.6.0"
+    }
+  ]
 }
