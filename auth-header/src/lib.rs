@@ -85,7 +85,7 @@ const TAIL: &AuthTail = &outbound_tail(FACT_DEFAULT_INBOUND_STYLE, STYLE_DECLS);
 const DIAG_IDS: &[AbiStr] = &[
     abi_str("BUSBAR-4013"),
     abi_str("BUSBAR-7087"),
-    abi_str("auth.credential-invalid-bytes"),
+    abi_str("BUSBAR-4030"),
 ];
 
 /// What the plugin states: its name, version, concurrency, diagnostics and auth tail.
