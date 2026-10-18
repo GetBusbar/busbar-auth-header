@@ -242,3 +242,34 @@ fn held_and_presented_credentials_are_wiped_on_drop() {
         held_as(caller)
     );
 }
+
+/// A SETTINGS-SUPPLIED HEADER NAME IS AN RFC 9110 TOKEN, LOWER-CASE, or the binding is refused at
+/// open, naming the setting (Q128 auth-header LOW): the host checks a plane's fields only, so a
+/// name the settings carry is this plugin's to judge. RED before the fix: any string was presented
+/// as a header name.
+#[test]
+fn a_header_name_that_is_no_lowercase_token_is_refused_at_open() {
+    for (settings, setting) in [
+        (r#"{"header": "x api key"}"#, "header"),
+        (r#"{"header": "X-Api-Key"}"#, "header"),
+        (r#"{"own": {"header": "x-key\r\n"}}"#, "own.header"),
+        (
+            r#"{"passthrough": {"header": "x:key"}}"#,
+            "passthrough.header",
+        ),
+        (
+            r#"{"families": [{"prefix": "sk-", "header": "bad name"}]}"#,
+            "families[0].header",
+        ),
+    ] {
+        let refused = lines(open(API_KEY, Some("k"), settings).0);
+        assert_eq!(refused.len(), 1, "{settings}: {refused:?}");
+        assert!(
+            refused[0].starts_with(&format!("settings: outbound auth setting `{setting}` ")),
+            "{settings}: {refused:?}"
+        );
+    }
+    assert!(open(API_KEY, Some("k"), r#"{"header": "x-api-key"}"#)
+        .0
+        .is_ok());
+}
