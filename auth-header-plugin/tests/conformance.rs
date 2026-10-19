@@ -67,6 +67,7 @@ fn s(b: &'static str) -> AbiStr {
     AbiStr {
         ptr: b.as_ptr(),
         len: b.len(),
+        ..AbiStr::ZERO
     }
 }
 
@@ -76,6 +77,7 @@ fn blob(b: &'static str, fmt: u32, flags: u32) -> Blob {
         len: b.len(),
         fmt,
         flags,
+        ..Blob::ZERO
     }
 }
 
@@ -182,6 +184,7 @@ fn facts() -> RequestFacts {
         query: AbiStr {
             ptr: std::ptr::null(),
             len: 0,
+            ..AbiStr::ZERO
         },
         timestamp: 1_440_938_160,
     }
