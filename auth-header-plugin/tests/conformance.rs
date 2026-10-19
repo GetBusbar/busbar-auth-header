@@ -440,10 +440,11 @@ const EXPECTED: &[&str] = &[
     "close Ready",
 ];
 
-/// The folds every build must hand the host: the un-encodable bearer's line at open, naming the
-/// bound protocol (none bound here: empty, as 1.5.5's override named none).
+/// The folds every build must hand the host: the un-encodable bearer's WARN line on the one request
+/// that would have carried it (1.5.5 logged it per request), naming the bound protocol (none bound
+/// here: empty, as 1.5.5's override named none).
 const EXPECTED_FOLDS: &[&str] = &[
-    "diag 1 sev=0 authorization credential contains invalid header bytes (ASCII control \
+    "diag 1 sev=1 authorization credential contains invalid header bytes (ASCII control \
      character); omitting auth header — upstream will reject with 401 protocol=",
 ];
 

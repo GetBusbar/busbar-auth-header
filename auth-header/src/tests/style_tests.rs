@@ -25,13 +25,18 @@ fn open(
     credential: Option<&str>,
     settings: &str,
 ) -> (Result<Binding, Vec<Refusal>>, Vec<Note>) {
-    let mut notes = Vec::new();
     let r = open_binding(
         style,
         credential.map(str::as_bytes),
         Some(settings.as_bytes()),
-        &mut notes,
     );
+    let notes = r
+        .as_ref()
+        .ok()
+        .and_then(Binding::own_note)
+        .cloned()
+        .into_iter()
+        .collect();
     (r, notes)
 }
 

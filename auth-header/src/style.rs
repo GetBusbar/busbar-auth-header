@@ -22,8 +22,10 @@
 //! unpresentable-credential line names (1.5.5's `protocol=` field; empty when absent).
 //!
 //! THE NOTES: a credential with bytes no header value may carry presents nothing, and raises the
-//! [`Note`] its 1.5.5 builder logged — the operator's own once, at open (1.5.5 froze that header
-//! once, at boot), a caller's on each request that presents it (1.5.5 built that one per request).
+//! [`Note`] its 1.5.5 builder logged, at WARN, on each request that would have carried it — the
+//! operator's own and a caller's alike (1.5.5 built every credential header per request: v1.5.5
+//! `crates/busbar/src/proxy/egress.rs:122-129`, `crates/busbar/src/proto/mod.rs:61-75`,
+//! `crates/busbar/src/egress_auth/mod.rs:215-229`, `crates/busbar/src/proto/anthropic/mod.rs:1227-1240`).
 //!
 //! THE REFUSALS (ARCHITECT ruling 2026-09-28): a binding that cannot open answers FAILED with one
 //! line per finding, each `credential: <text>` or `settings: <text>`. The kernel composes the 1.5.5
@@ -86,6 +88,9 @@ pub enum Note {
 pub struct Binding {
     scheme: StaticScheme,
     own: Vec<crate::present::Field>,
+    /// The note the operator's own credential raises on each request that would have carried it
+    /// (none when it presents, or when there is no credential).
+    own_note: Option<Note>,
     query: bool,
     protocol: String,
 }
@@ -110,6 +115,13 @@ impl Binding {
     /// The fields the binding's own credential presents (empty: no header) — [`Mode::Own`].
     pub fn own(&self) -> &[crate::present::Field] {
         &self.own
+    }
+
+    /// The note the binding's own credential raises on EACH request it presents nothing for: 1.5.5
+    /// built the header per request and logged its builder's line each time (v1.5.5
+    /// `crates/busbar/src/proxy/egress.rs:122-129` `lane_auth_headers` → `headers_for`).
+    pub fn own_note(&self) -> Option<&Note> {
+        self.own_note.as_ref()
     }
 
     /// Present a caller's `credential` by reference — [`Mode::Passthrough`], the per-request path:
@@ -255,7 +267,6 @@ pub fn open_binding(
     style: &str,
     credential: Option<&[u8]>,
     settings: Option<&[u8]>,
-    notes: &mut Vec<Note>,
 ) -> Result<Binding, Vec<Refusal>> {
     let m = object(settings).map_err(|r| vec![r])?;
     let credential_text = match credential.map(std::str::from_utf8) {
@@ -279,12 +290,12 @@ pub fn open_binding(
     } else {
         scheme.present(credential_text, Mode::Own)
     };
-    if !credential_text.is_empty() && own.is_empty() {
-        notes.push(unpresented(&scheme, credential_text, Mode::Own, &protocol));
-    }
+    let own_note = (!credential_text.is_empty() && own.is_empty())
+        .then(|| unpresented(&scheme, credential_text, Mode::Own, &protocol));
     Ok(Binding {
         scheme,
         own,
+        own_note,
         query: style == QUERY_KEY,
         protocol,
     })
