@@ -203,7 +203,7 @@ fn static_scheme(style: &str, m: &Map<String, Value>) -> Result<StaticScheme, Re
             param.as_deref().unwrap_or(QUERY_KEY_DEFAULT_PARAM),
         )));
     }
-    let default = match style {
+    let mut default = match style {
         BEARER => Presentation::BEARER,
         API_KEY => Presentation::raw(text(m, "header")?.as_deref().unwrap_or(API_KEY)),
         X_GOOG_API_KEY => {
@@ -215,39 +215,41 @@ fn static_scheme(style: &str, m: &Map<String, Value>) -> Result<StaticScheme, Re
             )))
         }
     };
-    header_name("header", &default)?;
+    header_name("header", &mut default)?;
     let mut scheme = StaticScheme::uniform(default);
-    if let Some(families) = field::<Vec<Family>>(m, "families")? {
-        for (i, family) in families.iter().enumerate() {
-            header_name(&format!("families[{i}].header"), &family.presented)?;
+    if let Some(mut families) = field::<Vec<Family>>(m, "families")? {
+        for (i, family) in families.iter_mut().enumerate() {
+            header_name(&format!("families[{i}].header"), &mut family.presented)?;
         }
         scheme.families = families;
     }
-    if let Some(own) = field::<Presentation>(m, "own")? {
-        header_name("own.header", &own)?;
+    if let Some(mut own) = field::<Presentation>(m, "own")? {
+        header_name("own.header", &mut own)?;
         scheme.own = own;
     }
-    if let Some(passthrough) = field::<Presentation>(m, "passthrough")? {
-        header_name("passthrough.header", &passthrough)?;
+    if let Some(mut passthrough) = field::<Presentation>(m, "passthrough")? {
+        header_name("passthrough.header", &mut passthrough)?;
         scheme.passthrough = passthrough;
     }
     Ok(scheme)
 }
 
 /// A header name the settings supply (`setting`), judged here: the host checks a plane's fields
-/// only, so a name this plugin presents is its own to hold to an RFC 9110 token, lower-case (the
-/// field lines' own spelling). Refused at open, naming the setting.
-fn header_name(setting: &str, p: &Presentation) -> Result<(), Refusal> {
-    let Some(name) = p.header.as_deref() else {
+/// only, so a name this plugin presents is its own to hold to an RFC 9110 token. Any case is
+/// accepted and the name is lower-cased as it is read, the field lines' own spelling: 1.5.5 loaded
+/// `header: X-API-Key` and presented `x-api-key` (its header type lower-cased every name). A name
+/// that is no token is refused at open, naming the setting.
+fn header_name(setting: &str, p: &mut Presentation) -> Result<(), Refusal> {
+    let Some(name) = p.header.as_mut() else {
         return Ok(());
     };
-    let lower = !name.bytes().any(|b| b.is_ascii_uppercase());
-    if lower && busbar_contract::header::is_header_name_token(name.as_bytes()) {
-        return Ok(());
+    if !busbar_contract::header::is_header_name_token(name.as_bytes()) {
+        return Err(Refusal::Settings(format!(
+            "outbound auth setting `{setting}` is not a header name (an RFC 9110 token)"
+        )));
     }
-    Err(Refusal::Settings(format!(
-        "outbound auth setting `{setting}` is not a lower-case header name (an RFC 9110 token)"
-    )))
+    name.make_ascii_lowercase();
+    Ok(())
 }
 
 /// The note for a credential a static scheme could not present, in the line its builder logged.

@@ -83,6 +83,9 @@ const CARRIERS: [MarkWord; 3] = [
 const TAIL: &AuthTail = &outbound_tail(FACT_DEFAULT_INBOUND_STYLE, STYLE_DECLS);
 
 /// The diagnostic ids, in `instance::diag` order: 1.5.5's catalog codes where the line had one.
+/// `BUSBAR-4013` covers both egress-credential lines that omit an api-key credential: the header
+/// line 1.5.5 logged, and the query-parameter line (a style 1.5.5 did not present), which says
+/// `param=` where the header line says `header=`; the named value tells the two apart.
 const DIAG_IDS: &[AbiStr] = &[
     abi_str("BUSBAR-4013"),
     abi_str("BUSBAR-7087"),

@@ -205,8 +205,12 @@ impl OutboundPlugin for Header {
                     // A caller's credential that is not UTF-8 presents nothing, and raises the note
                     // its scheme's builder raises for any unpresentable credential (classified on
                     // a lossy reading; the note names the protocol and header, never the bytes).
+                    // The reading is a copy of the caller's credential, so it is wiped on drop
+                    // (§6: "auth material is zeroised"); only this refused case makes it.
                     if !raw.is_empty() && caller.is_empty() {
-                        if let Some(note) = b.passthrough_note(&String::from_utf8_lossy(raw)) {
+                        let lossy =
+                            zeroize::Zeroizing::new(String::from_utf8_lossy(raw).into_owned());
+                        if let Some(note) = b.passthrough_note(&lossy) {
                             let (id, severity, text) = note_line(&note);
                             out.diag(id, severity, text);
                         }
