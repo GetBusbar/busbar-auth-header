@@ -278,3 +278,12 @@ fn a_header_name_that_is_no_lowercase_token_is_refused_at_open() {
         .0
         .is_ok());
 }
+
+/// A QUERY-PARAMETER credential no request target may carry is noted as the parameter it omitted,
+/// not as an auth header (Q128 auth-header NIT). RED before the fix: the line said "auth header".
+#[test]
+fn an_unpresentable_query_credential_is_noted_by_its_parameter() {
+    let (r, notes) = open(QUERY_KEY, Some("k\u{0}"), "{}");
+    assert!(own(r).is_empty());
+    assert_eq!(notes, [Note::Query(QUERY_KEY_DEFAULT_PARAM.to_string())]);
+}

@@ -83,6 +83,14 @@ pub(crate) fn note_line(n: &Note) -> (u32, u8, String) {
                  protocol={protocol}"
             ),
         ),
+        Note::Query(param) => (
+            diag::APIKEY_INVALID_BYTES,
+            SEVERITY_WARN,
+            format!(
+                "egress credential contains invalid bytes (ASCII control character); omitting the \
+                 auth query parameter — upstream will reject with 401 param={param}"
+            ),
+        ),
         Note::Family(protocol, header) => (
             diag::CREDENTIAL_INVALID_BYTES,
             SEVERITY_WARN,
@@ -191,11 +199,19 @@ impl OutboundPlugin for Header {
                 }
             }),
             Mode::Passthrough => {
-                let caller = request
-                    .caller_credential()
-                    .and_then(|c| std::str::from_utf8(c).ok())
-                    .unwrap_or("");
+                let raw = request.caller_credential().unwrap_or_default();
+                let caller = std::str::from_utf8(raw).unwrap_or("");
                 self.with_binding(handle, |b| {
+                    // A caller's credential that is not UTF-8 presents nothing, and raises the note
+                    // its scheme's builder raises for any unpresentable credential (classified on
+                    // a lossy reading; the note names the protocol and header, never the bytes).
+                    if !raw.is_empty() && caller.is_empty() {
+                        if let Some(note) = b.passthrough_note(&String::from_utf8_lossy(raw)) {
+                            let (id, severity, text) = note_line(&note);
+                            out.diag(id, severity, text);
+                        }
+                        return;
+                    }
                     let flags = if b.query() { FIELD_QUERY } else { FIELD_FLAGS };
                     let presented = b.present_passthrough(caller, |name, value| {
                         out.push(name, value, flags);

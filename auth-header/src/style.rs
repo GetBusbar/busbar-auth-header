@@ -81,6 +81,9 @@ pub enum Note {
     /// A credential-family table's credential omitted for invalid bytes, naming the protocol, then
     /// the header.
     Family(String, String),
+    /// A query-parameter credential ([`QUERY_KEY`]) omitted for invalid bytes, naming the
+    /// parameter. No 1.5.5 builder presented a query parameter, so its line names what it omitted.
+    Query(String),
 }
 
 /// One open binding: the scheme, the fields its own credential presents (built once), and the
@@ -147,8 +150,14 @@ impl Binding {
     /// The note for a caller's `credential` that [`Self::passthrough`] presented as nothing; none
     /// for an empty one (no credential, nothing to report).
     pub fn passthrough_note(&self, credential: &str) -> Option<Note> {
-        (!credential.is_empty())
-            .then(|| unpresented(&self.scheme, credential, Mode::Passthrough, &self.protocol))
+        (!credential.is_empty()).then(|| {
+            unpresented(
+                &self.scheme,
+                credential,
+                (Mode::Passthrough, self.query),
+                &self.protocol,
+            )
+        })
     }
 }
 
@@ -242,13 +251,21 @@ fn header_name(setting: &str, p: &Presentation) -> Result<(), Refusal> {
 }
 
 /// The note for a credential a static scheme could not present, in the line its builder logged.
-fn unpresented(scheme: &StaticScheme, credential: &str, mode: Mode, protocol: &str) -> Note {
+/// `query`: the binding presents a query parameter ([`QUERY_KEY`]), whose note names the parameter.
+fn unpresented(
+    scheme: &StaticScheme,
+    credential: &str,
+    (mode, query): (Mode, bool),
+    protocol: &str,
+) -> Note {
     let p = scheme.presentation(credential, mode);
     let header = p
         .header
         .clone()
         .unwrap_or_else(|| "authorization".to_string());
-    if !scheme.families.is_empty() {
+    if query {
+        Note::Query(header)
+    } else if !scheme.families.is_empty() {
         Note::Family(protocol.to_string(), header)
     } else if p.header.is_some() {
         Note::Header(header)
@@ -290,8 +307,14 @@ pub fn open_binding(
     } else {
         scheme.present(credential_text, Mode::Own)
     };
-    let own_note = (!credential_text.is_empty() && own.is_empty())
-        .then(|| unpresented(&scheme, credential_text, Mode::Own, &protocol));
+    let own_note = (!credential_text.is_empty() && own.is_empty()).then(|| {
+        unpresented(
+            &scheme,
+            credential_text,
+            (Mode::Own, style == QUERY_KEY),
+            &protocol,
+        )
+    });
     Ok(Binding {
         scheme,
         own,
