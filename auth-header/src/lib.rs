@@ -43,7 +43,7 @@ mod present;
 mod style;
 
 use busbar_contract::abi::auth::{
-    AuthPoints, AuthTail, StyleDecl, FACT_DEFAULT_INBOUND_STYLE, STYLE_CALLER_CREDENTIAL,
+    ranked, AuthPoints, AuthTail, StyleDecl, FACT_DEFAULT_INBOUND_STYLE, STYLE_CALLER_CREDENTIAL,
 };
 use busbar_contract::abi::mechanism::call::AbiStr;
 use busbar_contract::abi::mechanism::door::{MarkWord, Statement};
@@ -52,10 +52,20 @@ use busbar_contract::abi::sdk::auth_outbound::{outbound_tail, style as declare};
 use busbar_contract::abi::sdk::door::{abi_str, statement};
 
 /// The styles, as the tail declares them: every one of them also serves the caller's verified
-/// credential, and reads nothing past the head.
+/// credential, and reads nothing past the head. The two the previous release offered are ranked
+/// first and second, so the host lists them first, in its order, when it refuses an unknown style;
+/// the newer ones are unranked (listed after every ranked style, in declaration order).
 const STYLE_DECLS: &[StyleDecl] = &[
-    declare(style::BEARER, STYLE_CALLER_CREDENTIAL, AuthPoints::HEAD),
-    declare(style::API_KEY, STYLE_CALLER_CREDENTIAL, AuthPoints::HEAD),
+    declare(
+        style::BEARER,
+        STYLE_CALLER_CREDENTIAL | ranked(1),
+        AuthPoints::HEAD,
+    ),
+    declare(
+        style::API_KEY,
+        STYLE_CALLER_CREDENTIAL | ranked(2),
+        AuthPoints::HEAD,
+    ),
     declare(
         style::X_GOOG_API_KEY,
         STYLE_CALLER_CREDENTIAL,
