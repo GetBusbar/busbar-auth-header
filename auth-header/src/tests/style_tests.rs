@@ -248,15 +248,15 @@ fn held_and_presented_credentials_are_wiped_on_drop() {
     );
 }
 
-/// A SETTINGS-SUPPLIED HEADER NAME IS AN RFC 9110 TOKEN, LOWER-CASE, or the binding is refused at
-/// open, naming the setting (Q128 auth-header LOW): the host checks a plane's fields only, so a
-/// name the settings carry is this plugin's to judge. RED before the fix: any string was presented
-/// as a header name.
+/// A SETTINGS-SUPPLIED HEADER NAME IS AN RFC 9110 TOKEN, or the binding is refused at open, naming
+/// the setting (Q128 auth-header LOW): the host checks a plane's fields only, so a name the
+/// settings carry is this plugin's to judge. RED before the fix: any string was presented as a
+/// header name.
 #[test]
-fn a_header_name_that_is_no_lowercase_token_is_refused_at_open() {
+fn a_header_name_that_is_no_token_is_refused_at_open() {
     for (settings, setting) in [
         (r#"{"header": "x api key"}"#, "header"),
-        (r#"{"header": "X-Api-Key"}"#, "header"),
+        (r#"{"header": "X-API-Key "}"#, "header"),
         (r#"{"own": {"header": "x-key\r\n"}}"#, "own.header"),
         (
             r#"{"passthrough": {"header": "x:key"}}"#,
@@ -277,6 +277,30 @@ fn a_header_name_that_is_no_lowercase_token_is_refused_at_open() {
     assert!(open(API_KEY, Some("k"), r#"{"header": "x-api-key"}"#)
         .0
         .is_ok());
+}
+
+/// A MIXED-CASE HEADER NAME LOADS AND IS PRESENTED LOWER-CASE, as 1.5.5 loaded `header: X-API-Key`
+/// and presented `x-api-key` (its header type lower-cased every name). RED before the fix: the
+/// name was refused at open as not lower-case, breaking a 1.5.5 config.
+#[test]
+fn a_mixed_case_header_name_is_presented_lower_case_as_in_1_5_5() {
+    assert_eq!(
+        own(open(API_KEY, Some("sk-1"), r#"{"header": "X-API-Key"}"#).0),
+        vec![("x-api-key".to_string(), "sk-1".to_string())]
+    );
+    let families = r#"{"families":[{"prefix":"sk-","header":"X-Family-Key"}]}"#;
+    assert_eq!(
+        own(open(API_KEY, Some("sk-2"), families).0),
+        vec![("x-family-key".to_string(), "sk-2".to_string())]
+    );
+    let passthrough = r#"{"passthrough":{"header":"X-Pass-Key"}}"#;
+    let binding = open(API_KEY, None, passthrough)
+        .0
+        .expect("the binding opens");
+    assert_eq!(
+        binding.passthrough("other").plain(),
+        vec![("x-pass-key".to_string(), "other".to_string())]
+    );
 }
 
 /// A QUERY-PARAMETER credential no request target may carry is noted as the parameter it omitted,
