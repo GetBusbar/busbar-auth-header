@@ -12,7 +12,7 @@
 //!
 //! * `open_outbound` binds one style to its credential and settings and answers a handle
 //!   (generation data). It never touches the network.
-//! * `fields` is the ONE per-request call the kernel makes (BUSBAR-1.6.0.md §6.4, §11.6): the auth fields for this
+//! * `fields` is the per-request op (the auth kind's memory ABI): the auth fields for this
 //!   attempt, written into the host's buffer, which join the head before the framer encodes it. It
 //!   serves BOTH credential modes a style with [`busbar_contract::abi::auth::STYLE_CALLER_CREDENTIAL`]
 //!   declares: the operator's own bound credential ([`busbar_contract::abi::auth::MODE_OWN`]), and the
