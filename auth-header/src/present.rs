@@ -137,9 +137,10 @@ impl StaticScheme {
     /// Present `credential` in `mode` BY REFERENCE, the per-request path (THE DESIGN §11.2: "no
     /// allocation and no blocking on the hot path"): `emit(name, value)` once, with the bytes
     /// [`Self::present`] builds, or never when the credential cannot be presented. A raw value is
-    /// the credential's own bytes; a bearer value is staged on the stack (wiped when it drops) up
-    /// to [`STACK_VALUE`] bytes, in a zeroised heap buffer only past that. Answers whether it
-    /// emitted.
+    /// the credential's own bytes; a bearer value is built on the stack (wiped when it drops) up
+    /// to [`STACK_VALUE`] bytes, in a zeroised heap buffer only past that. What `emit` does with
+    /// the bytes is its own: the per-request path hands them to the SDK writer, which copies them
+    /// into its zeroising staging buffer (`FieldsWriter::push`). Answers whether it emitted.
     pub fn present_with(
         &self,
         credential: &str,

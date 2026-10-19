@@ -174,10 +174,13 @@ impl OutboundPlugin for Header {
         }
     }
 
-    /// THE ONE PER-REQUEST CALL, both credential modes. Every field is staged BY REFERENCE: the
-    /// binding's own straight from where it is held, under the read lock; a caller's presented
-    /// without a heap copy (THE DESIGN §11.2: "no allocation and no blocking on the hot path";
-    /// §6: "auth material is zeroised").
+    /// THE ONE PER-REQUEST CALL, both credential modes. Each field is handed to the SDK writer by
+    /// reference (the binding's own straight from where it is held, under the read lock; a
+    /// caller's as the bytes it arrived in), and the writer COPIES it into its own staging buffer,
+    /// a `Zeroizing<Vec<u8>>` wiped when the call ends (busbar-contract
+    /// `abi/sdk/auth_outbound.rs`, `FieldsWriter::push` staging name and value into `staged`), until
+    /// it is written into the host's field buffer. This plugin makes no copy of its own on the
+    /// presentable path (§6: "auth material is zeroised").
     fn fields(
         &self,
         request: &FieldsView<'_>,
@@ -208,8 +211,18 @@ impl OutboundPlugin for Header {
                     // The reading is a copy of the caller's credential, so it is wiped on drop
                     // (§6: "auth material is zeroised"); only this refused case makes it.
                     if !raw.is_empty() && caller.is_empty() {
-                        let lossy =
-                            zeroize::Zeroizing::new(String::from_utf8_lossy(raw).into_owned());
+                        // Built into a buffer sized for the worst case up front (every byte one
+                        // replacement character, three bytes), so it never reallocates and leaves
+                        // no unwiped earlier buffer behind.
+                        let mut lossy = zeroize::Zeroizing::new(String::with_capacity(
+                            raw.len().saturating_mul(3),
+                        ));
+                        for chunk in raw.utf8_chunks() {
+                            lossy.push_str(chunk.valid());
+                            if !chunk.invalid().is_empty() {
+                                lossy.push(char::REPLACEMENT_CHARACTER);
+                            }
+                        }
                         if let Some(note) = b.passthrough_note(&lossy) {
                             let (id, severity, text) = note_line(&note);
                             out.diag(id, severity, text);
