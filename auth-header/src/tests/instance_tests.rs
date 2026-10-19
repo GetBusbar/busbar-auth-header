@@ -63,21 +63,31 @@ fn a_refused_binding_answers_one_line_per_finding() {
     );
 }
 
+/// AN UNPRESENTABLE OWN CREDENTIAL IS NOTED ON EACH REQUEST, NOT AT OPEN: 1.5.5 built the header
+/// per request and logged its builder's WARN line each time (v1.5.5
+/// `crates/busbar/src/proxy/egress.rs:122-129`, `crates/busbar/src/egress_auth/mod.rs:215-229`).
+/// The binding opens with no line and holds the note `fields` raises per call. RED before the fix:
+/// the line was raised once, at open.
 #[test]
-fn an_unpresentable_own_credential_is_noted_once_at_open() {
+fn an_unpresentable_own_credential_is_noted_on_each_request_not_at_open() {
     let h = Header::new(1);
-    let (_, diags) = open(
+    let (handle, diags) = open(
         &h,
         style::API_KEY,
         Some("bad\nkey"),
         r#"{"header":"api-key"}"#,
     );
-    let noted: Vec<_> = diags.iter().collect();
-    assert_eq!(noted.len(), 1);
-    assert_eq!(noted[0].0, diag::APIKEY_INVALID_BYTES);
-    assert!(noted[0]
-        .2
-        .ends_with("upstream will reject with 401 header=api-key"));
+    assert_eq!(diags.iter().count(), 0, "nothing at open");
+    let note = h
+        .with_binding(handle, |b| b.own_note().cloned())
+        .flatten()
+        .expect("the per-request note");
+    let (id, severity, text) = note_line(&note);
+    assert_eq!(id, diag::APIKEY_INVALID_BYTES);
+    assert_eq!(severity, SEVERITY_WARN);
+    assert!(text.ends_with("upstream will reject with 401 header=api-key"));
+    let (fine, _) = open(&h, style::API_KEY, Some("good"), r#"{"header":"api-key"}"#);
+    assert_eq!(h.with_binding(fine, |b| b.own_note().cloned()), Some(None));
 }
 
 #[test]
@@ -95,7 +105,7 @@ fn note_line_reports_each_note_in_its_own_line() {
     assert_eq!(lines[2].0, diag::CREDENTIAL_INVALID_BYTES);
     assert_eq!(
         (lines[0].1, lines[1].1, lines[2].1),
-        (SEVERITY_WARN, SEVERITY_INFO, SEVERITY_WARN)
+        (SEVERITY_WARN, SEVERITY_WARN, SEVERITY_WARN)
     );
     assert!(lines[0]
         .2

@@ -15,7 +15,7 @@ use std::sync::{PoisonError, RwLock};
 use std::task::Poll;
 
 use busbar_contract::abi::auth::FIELD_QUERY;
-use busbar_contract::abi::mechanism::call::{SEVERITY_INFO, SEVERITY_WARN};
+use busbar_contract::abi::mechanism::call::SEVERITY_WARN;
 use busbar_contract::abi::sdk::auth_outbound::{
     Diags, FieldsAnswer, FieldsView, FieldsWriter, Mode, OpenRefusal, OutboundPlugin,
 };
@@ -76,7 +76,7 @@ pub(crate) fn note_line(n: &Note) -> (u32, u8, String) {
         ),
         Note::Bearer(protocol) => (
             diag::AUTH_INVALID_HEADER_BYTES,
-            SEVERITY_INFO,
+            SEVERITY_WARN,
             format!(
                 "authorization credential contains invalid header bytes (ASCII control \
                  character); omitting auth header — upstream will reject with 401 \
@@ -145,22 +145,17 @@ impl OutboundPlugin for Header {
     }
 
     /// Bind a style; FAILED carries one `credential: …` / `settings: …` line per finding
-    /// (ARCHITECT ruling 2026-09-28). An own credential no header value may carry is noted here,
-    /// once (1.5.5 froze that header once, at boot).
+    /// (ARCHITECT ruling 2026-09-28). An own credential no header value may carry opens (1.5.5
+    /// sent the request with no auth header) and is noted on each request, by `fields`.
     fn open_outbound(
         &self,
         style: &str,
         credential: Option<&[u8]>,
         settings: Option<&[u8]>,
         _host: Option<&Host>,
-        diags: &mut Diags,
+        _diags: &mut Diags,
     ) -> Result<u64, OpenRefusal> {
-        let mut notes = Vec::new();
-        let opened = style::open_binding(style, credential, settings, &mut notes);
-        for n in &notes {
-            let (id, severity, text) = note_line(n);
-            diags.push(id, severity, text);
-        }
+        let opened = style::open_binding(style, credential, settings);
         match opened {
             Ok(binding) => Ok(self.keep(binding)),
             Err(refusals) => {
@@ -187,6 +182,12 @@ impl OutboundPlugin for Header {
                 let flags = if b.query() { FIELD_QUERY } else { FIELD_FLAGS };
                 for (name, value) in b.own() {
                     out.push(name.as_bytes(), value.as_bytes(), flags);
+                }
+                // The operator's own credential no header value may carry: 1.5.5 built its header
+                // per request and logged its builder's line each time, so this call reports it.
+                if let Some(note) = b.own_note() {
+                    let (id, severity, text) = note_line(note);
+                    out.diag(id, severity, text);
                 }
             }),
             Mode::Passthrough => {

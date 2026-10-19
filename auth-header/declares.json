@@ -21,6 +21,15 @@
       "summary": "A credential from a credential-family table contains bytes invalid in an HTTP header value (for example a trailing newline), so the plugin omits the credential header and the upstream returns 401. It is raised on each request that would have carried the header, naming the protocol and the header.",
       "action": "Fix the credential's configured value (strip the control character, often a trailing newline from a file or env source). Egress to that upstream 401s until it is fixed.",
       "since": "1.6.0"
+    },
+    {
+      "code": 7087,
+      "slug": "proto-auth-invalid-header-bytes",
+      "title": "Egress credential has invalid header bytes (auth header omitted)",
+      "severity": "actionable",
+      "summary": "An egress authorization credential contains bytes that are not valid in an HTTP header value (an ASCII control character, such as a trailing newline), so the plugin omits the Authorization header rather than sending it malformed, and the upstream rejects the request with 401. The key itself is never logged, only the protocol name. It is raised on each request that would have carried the header.",
+      "action": "Fix the misconfigured lane's credential: the configured secret contains invalid header bytes. The protocol name in the log line locates the lane.",
+      "since": "1.6.0"
     }
   ]
 }
