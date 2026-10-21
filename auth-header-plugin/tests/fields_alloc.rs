@@ -27,7 +27,7 @@ use busbar_contract::abi::mechanism::lifecycle::{slot as life, OpenIn, OpenOut};
 use busbar_plugin_loader::dispatch::kinds::auth::Auth;
 use busbar_plugin_loader::dispatch::{
     in_head, load_linked, out_head, Bind, Diagnostic, DispatchConfig, Dispatcher, Dropped,
-    EnvelopeSink, Frame, LinkedRow, Metric, Plugin,
+    EnvelopeSink, Frame, LinkedRow, LoadedDoor, Metric, Plugin,
 };
 
 thread_local! {
@@ -88,19 +88,11 @@ fn z<T>() -> T {
 }
 
 fn s(b: &'static str) -> AbiStr {
-    AbiStr {
-        ptr: b.as_ptr(),
-        len: b.len(),
-    }
+    AbiStr::of(b)
 }
 
 fn blob(b: &'static str, fmt: u32, flags: u32) -> Blob {
-    Blob {
-        ptr: b.as_ptr(),
-        len: b.len(),
-        fmt,
-        flags,
-    }
+    Blob::of(b.as_bytes()).with_fmt(fmt).with_flags(flags)
 }
 
 #[derive(Default)]
@@ -122,7 +114,11 @@ fn plugin(d: &Dispatcher) -> Plugin<Auth> {
         dispatcher: d.adopter(),
         conns: busbar_plugin_loader::dispatch::ConnTable::NoNeeds,
     };
-    let row = LinkedRow::of(busbar_auth_header::door).expect("the door states its Statement");
+    // SAFETY: `door` is this crate's own `auth_outbound_door!` entry: it answers the `'static`,
+    // fully initialised door the SDK laid out.
+    #[allow(unused_unsafe)]
+    let loaded = unsafe { LoadedDoor::from_raw(busbar_auth_header::door) };
+    let row = LinkedRow::of_loaded(loaded).expect("the door states its Statement");
     let p = load_linked::<Auth>(&row, bind).expect("the linked door loads");
     let mut o: Frame<OpenIn, OpenOut> = Frame::new(z(), z());
     o.input.head = in_head();
@@ -166,10 +162,7 @@ impl Call {
             method: s("POST"),
             authority: s("api.example"),
             canonical_path: s("/v1/messages"),
-            query: AbiStr {
-                ptr: std::ptr::null(),
-                len: 0,
-            },
+            query: AbiStr::ABSENT,
             timestamp: 1_440_938_160,
         };
         f.input.caller_credential = caller;

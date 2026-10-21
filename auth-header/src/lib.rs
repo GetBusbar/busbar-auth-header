@@ -6,8 +6,7 @@
 //! BUSBAR-1.6.0.md THE DESIGN, §6 (OWNER-LOCKED 2026-09-27, split by mechanism per ARCHITECT ruling 2026-09-29):
 //! *"bearer"*, *"api-key"* and *"x-goog-api-key"* are ONE mechanism — a credential presented
 //! verbatim in an HTTP header, either the `authorization` bearer scheme or a raw custom header —
-//! and live in one plugin, `busbar-auth-header`, loaded when some provider uses one of them. Its
-//! fourth style, *"query-key"*, presents the credential verbatim as a query parameter instead. It
+//! and live in one plugin, `busbar-auth-header`, loaded when some provider uses one of them. It
 //! speaks the auth kind's memory ABI (`busbar_contract::abi::auth`, v3):
 //!
 //! * `open_outbound` binds one style to its credential and settings and answers a handle
@@ -61,7 +60,6 @@ const STYLE_DECLS: &[StyleDecl] = &[
         STYLE_CALLER_CREDENTIAL,
         AuthPoints::HEAD,
     ),
-    declare(style::QUERY_KEY, STYLE_CALLER_CREDENTIAL, AuthPoints::HEAD),
 ];
 
 /// THE HOST'S DEFAULT INBOUND STYLE's lines (busbar row 159, K3#1): where a caller's credential sits
@@ -82,39 +80,42 @@ const CARRIERS: [MarkWord; 3] = [
 /// Statement's carrier marks, [`CARRIERS`]); `verify` is not served.
 const TAIL: &AuthTail = &outbound_tail(FACT_DEFAULT_INBOUND_STYLE, STYLE_DECLS);
 
-/// The diagnostic ids, in `instance::diag` order: 1.5.5's catalog codes where the line had one.
-/// `BUSBAR-4013` covers both egress-credential lines that omit an api-key credential: the header
-/// line 1.5.5 logged, and the query-parameter line (a style 1.5.5 did not present), which says
-/// `param=` where the header line says `header=`; the named value tells the two apart.
+/// The diagnostic ids, in `instance::diag` order. This plugin OWNS these codes: it is the only
+/// code that raises them, so its `declares` document (the Statement's extensions, below) is their
+/// one catalogue entry, and busbar's kernel catalogue holds none of them. 1.5.5 had no diagnostic
+/// codes; the lines they tag are the warn lines 1.5.5's header builders logged.
 const DIAG_IDS: &[AbiStr] = &[
     abi_str("BUSBAR-4013"),
     abi_str("BUSBAR-7087"),
     abi_str("BUSBAR-4030"),
 ];
 
+busbar_contract::statement_extensions!(
+    /// The Statement's extensions: this plugin's whole `declares` document (BUSBAR-1.6.0.md l.246).
+    EXTENSIONS: [(
+        busbar_contract::abi::mechanism::extensions::EXT_DECLARES,
+        include_bytes!("../declares.json")
+    )]
+);
+
 /// What the plugin states: its name, version, concurrency, diagnostics and auth tail.
 const STATEMENT: Statement = with_tail(
-    Statement {
-        diag_ids: DIAG_IDS.as_ptr(),
-        diag_ids_len: DIAG_IDS.len(),
-        mark_words: CARRIERS.as_ptr(),
-        mark_words_len: CARRIERS.len(),
-        ..statement("busbar-auth-header", env!("CARGO_PKG_VERSION"), 1024)
+    {
+        let mut s = statement("busbar-auth-header", env!("CARGO_PKG_VERSION"), 1024)
+            .with_diag_ids(DIAG_IDS)
+            .with_mark_words(&CARRIERS);
+        s.extensions = EXTENSIONS;
+        s
     },
     TAIL,
 );
 
-busbar_contract::auth_outbound_door!(instance::Header, STATEMENT);
-
-/// THE COMPILED-IN ENTRY a composition root's `auths` row names: the door at
-/// `compiled_in::door::door`, the same [`door`] the dropped-in build
-/// (`busbar-auth-header-plugin`) exports (compiled-in = dropped-in).
-pub mod compiled_in {
-    /// The door and its `MACRO_DOOR` (the `plugin_door!` door a linked table names).
-    pub mod door {
-        pub use crate::{door, MACRO_DOOR};
-    }
+mod door {
+    busbar_contract::auth_outbound_door!(super::instance::Header, super::STATEMENT);
 }
+
+/// THE DOOR: this plugin's one public item (BUSBAR-1.6.0.md l.3567, Crate shape).
+pub use door::door;
 
 #[cfg(test)]
 #[path = "tests/statement_tests.rs"]

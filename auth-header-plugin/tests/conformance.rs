@@ -30,7 +30,7 @@
 // `dropped-in`), driven by `conformance.json`; the hand-written both-ways proof below stays beside
 // it. `plugin-ci.yml` runs the suite under `--release` once the crate lives in its own repo.
 busbar_plugin_loader::conformance_suite! {
-    door: busbar_auth_header::door,
+    loaded: real_loaded(),
     cdylib: "busbar_auth_header_plugin",
     inputs: include_str!("conformance.json"),
 }
@@ -54,8 +54,9 @@ use busbar_contract::abi::mechanism::lifecycle::{
 };
 use busbar_plugin_loader::dispatch::kinds::auth::Auth;
 use busbar_plugin_loader::dispatch::{
-    in_head, load_dropped, load_linked, out_head, rendering_of, Bind, Diagnostic, DispatchConfig,
-    Dispatcher, Dropped, EnvelopeSink, Frame, LinkedRow, Metric, Plugin,
+    in_head, load_dropped, load_linked, out_head, rendering_of_loaded, Bind, Diagnostic,
+    DispatchConfig, Dispatcher, Dropped, EnvelopeSink, Frame, LinkedRow, LoadedDoor, Metric,
+    Plugin,
 };
 
 fn z<T>() -> T {
@@ -64,19 +65,11 @@ fn z<T>() -> T {
 }
 
 fn s(b: &'static str) -> AbiStr {
-    AbiStr {
-        ptr: b.as_ptr(),
-        len: b.len(),
-    }
+    AbiStr::of(b)
 }
 
 fn blob(b: &'static str, fmt: u32, flags: u32) -> Blob {
-    Blob {
-        ptr: b.as_ptr(),
-        len: b.len(),
-        fmt,
-        flags,
-    }
+    Blob::of(b.as_bytes()).with_fmt(fmt).with_flags(flags)
 }
 
 fn json(b: &'static str) -> Blob {
@@ -118,21 +111,38 @@ fn bind(folds: &Arc<Folds>, dispatcher: &Dispatcher) -> Bind {
     }
 }
 
+/// This crate's own bare `door`, as the loader takes a door it did not read from a library.
+#[allow(unused_unsafe)]
+fn real_loaded() -> LoadedDoor {
+    // SAFETY: `door` is this crate's own `auth_outbound_door!` entry: it answers the `'static`,
+    // fully initialised door the SDK laid out.
+    unsafe { LoadedDoor::from_raw(busbar_auth_header::door) }
+}
+
 /// The compiled-in row `door` states: its Statement rendering and the door.
 fn row(door: DoorFn) -> LinkedRow {
-    LinkedRow::of(door).expect("the door states its Statement")
+    // SAFETY: `door` is one of this file's forged doors, a `'static` door built over the plugin's
+    // own tables; the block is needed on #1469/#1471 (`from_raw` is an `unsafe fn` there) and
+    // allowed where it is not.
+    #[allow(unused_unsafe)]
+    let door = unsafe { LoadedDoor::from_raw(door) };
+    LinkedRow::of_loaded(door).expect("the door states its Statement")
+}
+
+/// The compiled-in row of this crate's own door.
+fn real_row() -> LinkedRow {
+    LinkedRow::of_loaded(real_loaded()).expect("the door states its Statement")
 }
 
 fn linked(folds: &Arc<Folds>, d: &Dispatcher) -> Plugin<Auth> {
-    load_linked::<Auth>(&row(busbar_auth_header::door), bind(folds, d))
-        .expect("the linked door loads")
+    load_linked::<Auth>(&real_row(), bind(folds, d)).expect("the linked door loads")
 }
 
 /// This crate's own cdylib, beside the test executable's `deps/`. Under CI a missing artifact is a
 /// failure, never a skip.
 fn dropped(folds: &Arc<Folds>, d: &Dispatcher) -> Option<Plugin<Auth>> {
     let path = busbar_plugin_loader::conformance::cdylib_of("busbar_auth_header_plugin");
-    let stated = rendering_of(busbar_auth_header::door).expect("the door renders its Statement");
+    let stated = rendering_of_loaded(real_loaded()).expect("the door renders its Statement");
     Some(load_dropped::<Auth>(&path, &stated, bind(folds, d)).expect("the dropped door loads"))
 }
 
@@ -179,10 +189,7 @@ fn facts() -> RequestFacts {
         method: s("POST"),
         authority: s("runtime.signer.example"),
         canonical_path: s("/model/m/converse"),
-        query: AbiStr {
-            ptr: std::ptr::null(),
-            len: 0,
-        },
+        query: AbiStr::ABSENT,
         timestamp: 1_440_938_160,
     }
 }
@@ -314,21 +321,6 @@ fn script(p: &Plugin<Auth>) -> Vec<String> {
     ));
     t.push(fields(p, keyless, MODE_OWN, z(), (256, 4)));
     t.push(fields(p, 999, MODE_OWN, z(), (256, 4)));
-    // THE QUERY STYLE: the credential as a query parameter the framer appends, flagged
-    // FIELD_QUERY (2), under the dialect's parameter name.
-    let (l, query) = open_outbound(p, "query-key", Some("gem-key"), "{}");
-    t.push(l);
-    let (l, named) = open_outbound(p, "query-key", Some("gem-key"), r#"{"param":"api_key"}"#);
-    t.push(l);
-    t.push(fields(p, query, MODE_OWN, z(), (256, 4)));
-    t.push(fields(p, named, MODE_OWN, z(), (256, 4)));
-    t.push(fields(
-        p,
-        query,
-        MODE_PASSTHROUGH,
-        secret("caller-tok"),
-        (256, 4),
-    ));
 
     for h in [bearer, api_key, goog, keyless] {
         t.push(ready(p, h));
@@ -420,11 +412,6 @@ const EXPECTED: &[&str] = &[
     "fields Ready  authorization: Bearer caller-tok [flags=0]",
     "fields Ready  ",
     "fields Refused ",
-    "open_outbound query-key Ready ",
-    "open_outbound query-key Ready ",
-    "fields Ready  key: gem-key [flags=2]",
-    "fields Ready  api_key: gem-key [flags=2]",
-    "fields Ready  key: caller-tok [flags=2]",
     "ready Ready 1",
     "ready Ready 1",
     "ready Ready 1",
@@ -502,7 +489,9 @@ fn real_fields() -> Op {
 
 /// The real `fields`, then every written field marked `FIELD_SENSITIVE`.
 extern "C" fn sensitive_fields(inst: *mut c_void, i: *const c_void, o: *mut c_void) -> RawOutcome {
-    let r = real_fields()(inst, i, o);
+    // SAFETY: the plugin's own `fields` slot, called with the host's live arguments.
+    #[allow(unused_unsafe)]
+    let r = unsafe { real_fields()(inst, i, o) };
     // SAFETY: the host's live `FieldsIn`/`FieldsOut` for this call.
     unsafe {
         let (i, o) = (&*i.cast::<FieldsIn>(), &*o.cast::<FieldsOut>());
@@ -586,4 +575,15 @@ fn the_bearer_field_is_the_h2_parity_harness_input() {
             "fields Ready  authorization: Bearer sk-ant-test-0123456789 [flags=0]"
         );
     }
+}
+
+/// The door's Statement carries the whole `declares` document under `EXT_DECLARES`.
+#[test]
+fn the_statement_carries_the_declares_document() {
+    let row = LinkedRow::of_loaded(real_loaded()).unwrap();
+    let read = busbar_contract::abi::mechanism::rendering::read(&row.statement).unwrap();
+    assert_eq!(
+        busbar_contract::abi::mechanism::extensions::declares(&read.extensions.bytes),
+        Some(&include_bytes!("../../auth-header/declares.json")[..]),
+    );
 }

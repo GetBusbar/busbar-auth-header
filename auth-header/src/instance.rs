@@ -14,7 +14,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{PoisonError, RwLock};
 use std::task::Poll;
 
-use busbar_contract::abi::auth::FIELD_QUERY;
 use busbar_contract::abi::mechanism::call::SEVERITY_WARN;
 use busbar_contract::abi::sdk::auth_outbound::{
     Diags, FieldsAnswer, FieldsView, FieldsWriter, Mode, OpenRefusal, OutboundPlugin,
@@ -27,9 +26,11 @@ use crate::style::{self, Binding, Note};
 
 /// The index of each diagnostic id in the Statement (`crate::DIAG_IDS`).
 pub(crate) mod diag {
-    /// A static header omitted for invalid bytes (1.5.5 `EGRESS_APIKEY_INVALID_BYTES`).
+    /// A static header omitted for invalid bytes (`BUSBAR-4013`; 1.5.5's line, v1.5.5
+    /// `crates/busbar/src/egress_auth/mod.rs:220-224`).
     pub const APIKEY_INVALID_BYTES: u32 = 0;
-    /// A bearer omitted for invalid bytes (1.5.5 `PROTO_AUTH_INVALID_HEADER_BYTES`).
+    /// A bearer omitted for invalid bytes (`BUSBAR-7087`; 1.5.5's line, v1.5.5
+    /// `crates/busbar/src/proto/mod.rs:67-71`).
     pub const AUTH_INVALID_HEADER_BYTES: u32 = 1;
     /// A credential-family table's credential omitted for invalid bytes.
     pub const CREDENTIAL_INVALID_BYTES: u32 = 2;
@@ -81,14 +82,6 @@ pub(crate) fn note_line(n: &Note) -> (u32, u8, String) {
                 "authorization credential contains invalid header bytes (ASCII control \
                  character); omitting auth header — upstream will reject with 401 \
                  protocol={protocol}"
-            ),
-        ),
-        Note::Query(param) => (
-            diag::APIKEY_INVALID_BYTES,
-            SEVERITY_WARN,
-            format!(
-                "egress credential contains invalid bytes (ASCII control character); omitting the \
-                 auth query parameter — upstream will reject with 401 param={param}"
             ),
         ),
         Note::Family(protocol, header) => (
@@ -190,9 +183,8 @@ impl OutboundPlugin for Header {
         let handle = request.handle();
         let answered = match request.mode() {
             Mode::Own => self.with_binding(handle, |b| {
-                let flags = if b.query() { FIELD_QUERY } else { FIELD_FLAGS };
                 for (name, value) in b.own() {
-                    out.push(name.as_bytes(), value.as_bytes(), flags);
+                    out.push(name.as_bytes(), value.as_bytes(), FIELD_FLAGS);
                 }
                 // The operator's own credential no header value may carry: 1.5.5 built its header
                 // per request and logged its builder's line each time, so this call reports it.
@@ -229,9 +221,8 @@ impl OutboundPlugin for Header {
                         }
                         return;
                     }
-                    let flags = if b.query() { FIELD_QUERY } else { FIELD_FLAGS };
                     let presented = b.present_passthrough(caller, |name, value| {
-                        out.push(name, value, flags);
+                        out.push(name, value, FIELD_FLAGS);
                     });
                     // A caller's credential no header value may carry: 1.5.5 logged its builder's
                     // line on each request that presented it, so this call reports it.

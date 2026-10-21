@@ -72,33 +72,6 @@
             "goog-key"
           ]
         ]
-      },
-      {
-        "style": "query-key",
-        "credential": "gem-key",
-        "settings": {
-          "param": "api_key"
-        },
-        "head": {
-          "method": "POST",
-          "authority": "runtime.signer.example",
-          "target": "/model/m/converse",
-          "timestamp": 1440938160,
-          "fields": [
-            [
-              "content-type",
-              "application/json"
-            ]
-          ],
-          "body": "{}"
-        },
-        "expect_fields": [
-          [
-            "api_key",
-            "gem-key",
-            2
-          ]
-        ]
       }
     ]
   }
