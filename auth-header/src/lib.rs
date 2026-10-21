@@ -100,18 +100,22 @@ busbar_contract::statement_extensions!(
 
 /// What the plugin states: its name, version, concurrency, diagnostics and auth tail.
 const STATEMENT: Statement = with_tail(
-    Statement {
-        diag_ids: DIAG_IDS.as_ptr(),
-        diag_ids_len: DIAG_IDS.len(),
-        mark_words: CARRIERS.as_ptr(),
-        mark_words_len: CARRIERS.len(),
-        extensions: EXTENSIONS,
-        ..statement("busbar-auth-header", env!("CARGO_PKG_VERSION"), 1024)
+    {
+        let mut s = statement("busbar-auth-header", env!("CARGO_PKG_VERSION"), 1024)
+            .with_diag_ids(DIAG_IDS)
+            .with_mark_words(&CARRIERS);
+        s.extensions = EXTENSIONS;
+        s
     },
     TAIL,
 );
 
-busbar_contract::auth_outbound_door!(instance::Header, STATEMENT);
+mod door {
+    busbar_contract::auth_outbound_door!(super::instance::Header, super::STATEMENT);
+}
+
+/// THE DOOR: this plugin's one public item (BUSBAR-1.6.0.md l.3567, Crate shape).
+pub use door::door;
 
 #[cfg(test)]
 #[path = "tests/statement_tests.rs"]
