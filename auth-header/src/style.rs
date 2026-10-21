@@ -14,7 +14,6 @@
 //! | `bearer` | `{families?, own?, passthrough?, protocol?}` (default: `Bearer` whatever the credential) |
 //! | `api-key` | `{header?: "api-key", families?, own?, passthrough?, protocol?}` |
 //! | `x-goog-api-key` | `{header?: "x-goog-api-key", families?, own?, passthrough?, protocol?}` |
-//! | `query-key` | `{param?: "key"}` (the dialect's default parameter name) |
 //!
 //! `families` is a dialect's credential-family table, `[{prefix, header?, trim_start?}]` (a row
 //! without `header` presents as a bearer); `own` / `passthrough` are `{header?, trim_start?}`.
@@ -28,9 +27,13 @@
 //! `crates/busbar/src/egress_auth/mod.rs:215-229`, `crates/busbar/src/proto/anthropic/mod.rs:1227-1240`).
 //!
 //! THE REFUSALS (ARCHITECT ruling 2026-09-28): a binding that cannot open answers FAILED with one
-//! line per finding, each `credential: <text>` or `settings: <text>`. The kernel composes the 1.5.5
-//! sentence — `provider '<p>' <style> credential (from <src>) is invalid: <text>`, or
-//! `provider '<p>' <text>` — so every `<text>` below is 1.5.5's own words.
+//! line per finding, each `credential: <text>` or `settings: <text>`, and the kernel composes the
+//! sentence around it — `provider '<p>' <style> credential (from <src>) is invalid: <text>`, or
+//! `provider '<p>' <text>`. Every `<text>` below is NEW in 1.6.0, not 1.5.5's words: 1.5.5 refused a
+//! credential only for `oauth-client-credentials` and `jwt-bearer` (v1.5.5
+//! `crates/busbar/src/config_validate/mod.rs:516`, `:543`) and never for a header style. Each refuses
+//! settings or a credential the kernel builds from a valid config, so no valid 1.5.5 config reaches
+//! one.
 
 use serde::Deserialize;
 use serde_json::{Map, Value};
@@ -43,12 +46,6 @@ pub const BEARER: &str = "bearer";
 pub const API_KEY: &str = "api-key";
 /// The credential verbatim in `x-goog-api-key`.
 pub const X_GOOG_API_KEY: &str = "x-goog-api-key";
-/// The credential verbatim as a QUERY PARAMETER on the request target (`?key=<credential>` unless
-/// the settings name another `param`), never a header: its fields carry
-/// [`FIELD_QUERY`](busbar_contract::abi::auth::FIELD_QUERY).
-pub const QUERY_KEY: &str = "query-key";
-/// The query parameter [`QUERY_KEY`] presents under when the settings name none.
-pub const QUERY_KEY_DEFAULT_PARAM: &str = "key";
 
 /// One finding that refuses a binding.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -74,16 +71,13 @@ impl Refusal {
 /// diagnostic it raises.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Note {
-    /// A static header omitted for invalid bytes (`EGRESS_APIKEY_INVALID_BYTES`), naming the header.
+    /// A static header omitted for invalid bytes (`BUSBAR-4013`), naming the header.
     Header(String),
-    /// A bearer omitted for invalid bytes (`PROTO_AUTH_INVALID_HEADER_BYTES`), naming the protocol.
+    /// A bearer omitted for invalid bytes (`BUSBAR-7087`), naming the protocol.
     Bearer(String),
     /// A credential-family table's credential omitted for invalid bytes, naming the protocol, then
     /// the header.
     Family(String, String),
-    /// A query-parameter credential ([`QUERY_KEY`]) omitted for invalid bytes, naming the
-    /// parameter. No 1.5.5 builder presented a query parameter, so its line names what it omitted.
-    Query(String),
 }
 
 /// One open binding: the scheme, the fields its own credential presents (built once), and the
@@ -94,7 +88,6 @@ pub struct Binding {
     /// The note the operator's own credential raises on each request that would have carried it
     /// (none when it presents, or when there is no credential).
     own_note: Option<Note>,
-    query: bool,
     protocol: String,
 }
 
@@ -103,18 +96,12 @@ impl std::fmt::Debug for Binding {
         // Never the presented values: they are credential material.
         f.debug_struct("Binding")
             .field("own", &self.own.len())
-            .field("query", &self.query)
             .field("protocol", &self.protocol)
             .finish_non_exhaustive()
     }
 }
 
 impl Binding {
-    /// Whether this binding's fields are query parameters ([`QUERY_KEY`]), not headers.
-    pub fn query(&self) -> bool {
-        self.query
-    }
-
     /// The fields the binding's own credential presents (empty: no header) — [`Mode::Own`].
     pub fn own(&self) -> &[crate::present::Field] {
         &self.own
@@ -151,12 +138,7 @@ impl Binding {
     /// for an empty one (no credential, nothing to report).
     pub fn passthrough_note(&self, credential: &str) -> Option<Note> {
         (!credential.is_empty()).then(|| {
-            unpresented(
-                &self.scheme,
-                credential,
-                (Mode::Passthrough, self.query),
-                &self.protocol,
-            )
+            unpresented(&self.scheme, credential, Mode::Passthrough, &self.protocol)
         })
     }
 }
@@ -196,13 +178,6 @@ fn text(m: &Map<String, Value>, key: &str) -> Result<Option<String>, Refusal> {
 
 /// A style's scheme: its default presentation, overridden by the settings.
 fn static_scheme(style: &str, m: &Map<String, Value>) -> Result<StaticScheme, Refusal> {
-    if style == QUERY_KEY {
-        // One parameter, the credential verbatim; the header settings do not apply to it.
-        let param = text(m, "param")?;
-        return Ok(StaticScheme::uniform(Presentation::raw(
-            param.as_deref().unwrap_or(QUERY_KEY_DEFAULT_PARAM),
-        )));
-    }
     let mut default = match style {
         BEARER => Presentation::BEARER,
         API_KEY => Presentation::raw(text(m, "header")?.as_deref().unwrap_or(API_KEY)),
@@ -253,21 +228,13 @@ fn header_name(setting: &str, p: &mut Presentation) -> Result<(), Refusal> {
 }
 
 /// The note for a credential a static scheme could not present, in the line its builder logged.
-/// `query`: the binding presents a query parameter ([`QUERY_KEY`]), whose note names the parameter.
-fn unpresented(
-    scheme: &StaticScheme,
-    credential: &str,
-    (mode, query): (Mode, bool),
-    protocol: &str,
-) -> Note {
+fn unpresented(scheme: &StaticScheme, credential: &str, mode: Mode, protocol: &str) -> Note {
     let p = scheme.presentation(credential, mode);
     let header = p
         .header
         .clone()
         .unwrap_or_else(|| "authorization".to_string());
-    if query {
-        Note::Query(header)
-    } else if !scheme.families.is_empty() {
+    if !scheme.families.is_empty() {
         Note::Family(protocol.to_string(), header)
     } else if p.header.is_some() {
         Note::Header(header)
@@ -309,19 +276,12 @@ pub fn open_binding(
     } else {
         scheme.present(credential_text, Mode::Own)
     };
-    let own_note = (!credential_text.is_empty() && own.is_empty()).then(|| {
-        unpresented(
-            &scheme,
-            credential_text,
-            (Mode::Own, style == QUERY_KEY),
-            &protocol,
-        )
-    });
+    let own_note = (!credential_text.is_empty() && own.is_empty())
+        .then(|| unpresented(&scheme, credential_text, Mode::Own, &protocol));
     Ok(Binding {
         scheme,
         own,
         own_note,
-        query: style == QUERY_KEY,
         protocol,
     })
 }

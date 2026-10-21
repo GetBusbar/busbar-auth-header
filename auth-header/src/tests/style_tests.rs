@@ -194,36 +194,6 @@ fn an_unknown_style_or_malformed_settings_is_refused() {
     );
 }
 
-/// THE QUERY STYLE: the credential verbatim under the dialect's parameter (`key` by default), its
-/// binding marked as query parameters, never a header; the header styles are not.
-#[test]
-fn the_query_style_presents_a_query_parameter() {
-    let b = open(QUERY_KEY, Some("gem-1"), "{}").0.expect("opens");
-    assert!(b.query());
-    assert_eq!(b.own().plain(), &[("key".to_string(), "gem-1".to_string())]);
-    assert_eq!(
-        b.passthrough("caller-1").plain(),
-        vec![("key".to_string(), "caller-1".to_string())]
-    );
-    let named = open(QUERY_KEY, Some("gem-1"), r#"{"param":"api_key"}"#)
-        .0
-        .expect("opens");
-    assert_eq!(
-        named.own().plain(),
-        &[("api_key".to_string(), "gem-1".to_string())]
-    );
-    for style in [BEARER, API_KEY, X_GOOG_API_KEY] {
-        assert!(
-            !open(style, Some("k"), "{}").0.expect("opens").query(),
-            "{style}"
-        );
-    }
-    assert!(
-        own(open(QUERY_KEY, None, "{}").0).is_empty(),
-        "no credential, no parameter"
-    );
-}
-
 /// The type a value is held as.
 fn held_as<T>(_: &T) -> &'static str {
     std::any::type_name::<T>()
@@ -301,13 +271,4 @@ fn a_mixed_case_header_name_is_presented_lower_case_as_in_1_5_5() {
         binding.passthrough("other").plain(),
         vec![("x-pass-key".to_string(), "other".to_string())]
     );
-}
-
-/// A QUERY-PARAMETER credential no request target may carry is noted as the parameter it omitted,
-/// not as an auth header (Q128 auth-header NIT). RED before the fix: the line said "auth header".
-#[test]
-fn an_unpresentable_query_credential_is_noted_by_its_parameter() {
-    let (r, notes) = open(QUERY_KEY, Some("k\u{0}"), "{}");
-    assert!(own(r).is_empty());
-    assert_eq!(notes, [Note::Query(QUERY_KEY_DEFAULT_PARAM.to_string())]);
 }
