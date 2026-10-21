@@ -92,6 +92,14 @@ const DIAG_IDS: &[AbiStr] = &[
     abi_str("BUSBAR-4030"),
 ];
 
+busbar_contract::statement_extensions!(
+    /// The Statement's extensions: this plugin's whole `declares` document (BUSBAR-1.6.0.md l.246).
+    EXTENSIONS: [(
+        busbar_contract::abi::mechanism::extensions::EXT_DECLARES,
+        include_bytes!("../declares.json"),
+    )]
+);
+
 /// What the plugin states: its name, version, concurrency, diagnostics and auth tail.
 const STATEMENT: Statement = with_tail(
     Statement {
@@ -99,22 +107,13 @@ const STATEMENT: Statement = with_tail(
         diag_ids_len: DIAG_IDS.len(),
         mark_words: CARRIERS.as_ptr(),
         mark_words_len: CARRIERS.len(),
+        extensions: EXTENSIONS,
         ..statement("busbar-auth-header", env!("CARGO_PKG_VERSION"), 1024)
     },
     TAIL,
 );
 
 busbar_contract::auth_outbound_door!(instance::Header, STATEMENT);
-
-/// THE COMPILED-IN ENTRY a composition root's `auths` row names: the door at
-/// `compiled_in::door::door`, the same [`door`] the dropped-in build
-/// (`busbar-auth-header-plugin`) exports (compiled-in = dropped-in).
-pub mod compiled_in {
-    /// The door.
-    pub mod door {
-        pub use crate::door;
-    }
-}
 
 #[cfg(test)]
 #[path = "tests/statement_tests.rs"]

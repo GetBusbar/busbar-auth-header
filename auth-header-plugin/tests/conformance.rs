@@ -587,3 +587,14 @@ fn the_bearer_field_is_the_h2_parity_harness_input() {
         );
     }
 }
+
+/// The door's Statement carries the whole `declares` document under `EXT_DECLARES`.
+#[test]
+fn the_statement_carries_the_declares_document() {
+    let row = busbar_plugin_loader::dispatch::LinkedRow::of(busbar_auth_header::door).unwrap();
+    let read = busbar_contract::abi::mechanism::rendering::read(&row.statement).unwrap();
+    assert_eq!(
+        busbar_contract::abi::mechanism::extensions::declares(&read.extensions.bytes),
+        Some(&include_bytes!("../../auth-header/declares.json")[..]),
+    );
+}
