@@ -88,19 +88,11 @@ fn z<T>() -> T {
 }
 
 fn s(b: &'static str) -> AbiStr {
-    AbiStr {
-        ptr: b.as_ptr(),
-        len: b.len(),
-    }
+    AbiStr::of(b)
 }
 
 fn blob(b: &'static str, fmt: u32, flags: u32) -> Blob {
-    Blob {
-        ptr: b.as_ptr(),
-        len: b.len(),
-        fmt,
-        flags,
-    }
+    Blob::of(b.as_bytes()).with_fmt(fmt).with_flags(flags)
 }
 
 #[derive(Default)]
@@ -122,7 +114,8 @@ fn plugin(d: &Dispatcher) -> Plugin<Auth> {
         dispatcher: d.adopter(),
         conns: busbar_plugin_loader::dispatch::ConnTable::NoNeeds,
     };
-    let row = LinkedRow::of(busbar_auth_header::door).expect("the door states its Statement");
+    let row =
+        LinkedRow::of_macro(busbar_auth_header::MACRO_DOOR).expect("the door states its Statement");
     let p = load_linked::<Auth>(&row, bind).expect("the linked door loads");
     let mut o: Frame<OpenIn, OpenOut> = Frame::new(z(), z());
     o.input.head = in_head();
@@ -166,10 +159,7 @@ impl Call {
             method: s("POST"),
             authority: s("api.example"),
             canonical_path: s("/v1/messages"),
-            query: AbiStr {
-                ptr: std::ptr::null(),
-                len: 0,
-            },
+            query: AbiStr::ABSENT,
             timestamp: 1_440_938_160,
         };
         f.input.caller_credential = caller;

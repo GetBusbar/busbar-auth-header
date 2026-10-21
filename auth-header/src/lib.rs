@@ -94,13 +94,9 @@ const DIAG_IDS: &[AbiStr] = &[
 
 /// What the plugin states: its name, version, concurrency, diagnostics and auth tail.
 const STATEMENT: Statement = with_tail(
-    Statement {
-        diag_ids: DIAG_IDS.as_ptr(),
-        diag_ids_len: DIAG_IDS.len(),
-        mark_words: CARRIERS.as_ptr(),
-        mark_words_len: CARRIERS.len(),
-        ..statement("busbar-auth-header", env!("CARGO_PKG_VERSION"), 1024)
-    },
+    statement("busbar-auth-header", env!("CARGO_PKG_VERSION"), 1024)
+        .with_diag_ids(DIAG_IDS)
+        .with_mark_words(&CARRIERS),
     TAIL,
 );
 

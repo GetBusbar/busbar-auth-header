@@ -22,5 +22,5 @@ fn the_default_inbound_style_is_the_1_5_5_client_token_lines_in_order() {
     assert!(CARRIERS
         .iter()
         .all(|w| w.class == busbar_contract::abi::mechanism::door::MARK_WORD_CARRIER));
-    assert_eq!(STATEMENT.mark_words_len, 3);
+    assert_eq!(STATEMENT.mark_words_len(), 3);
 }
