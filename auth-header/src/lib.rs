@@ -110,9 +110,9 @@ busbar_contract::auth_outbound_door!(instance::Header, STATEMENT);
 /// `compiled_in::door::door`, the same [`door`] the dropped-in build
 /// (`busbar-auth-header-plugin`) exports (compiled-in = dropped-in).
 pub mod compiled_in {
-    /// The door.
+    /// The door and its `MACRO_DOOR` (the `plugin_door!` door a linked table names).
     pub mod door {
-        pub use crate::door;
+        pub use crate::{door, MACRO_DOOR};
     }
 }
 
