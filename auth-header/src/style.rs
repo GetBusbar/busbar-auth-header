@@ -137,9 +137,8 @@ impl Binding {
     /// The note for a caller's `credential` that [`Self::passthrough`] presented as nothing; none
     /// for an empty one (no credential, nothing to report).
     pub fn passthrough_note(&self, credential: &str) -> Option<Note> {
-        (!credential.is_empty()).then(|| {
-            unpresented(&self.scheme, credential, Mode::Passthrough, &self.protocol)
-        })
+        (!credential.is_empty())
+            .then(|| unpresented(&self.scheme, credential, Mode::Passthrough, &self.protocol))
     }
 }
 
