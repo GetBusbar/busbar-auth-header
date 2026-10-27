@@ -2,49 +2,17 @@
 // Copyright (C) 2026 Busbar Inc and contributors
 
 //! THE HEADER PRESENTATION: `bearer`, `api-key`, `x-goog-api-key`, and a dialect's credential-family
-//! table. MOVED VERBATIM from the identity unit's `egress_auth/mod.rs` in the kernel (the header builders
-//! and their one legality rule) and `.../declared.rs` (the credential-family presentation,
-//! `presentation`/`present`), staged `busbar-auth-outbound::present` (KERNEL<>PLUGINS step 22), then
-//! here (AUTH-SPLIT: bearer/api-key/x-goog-api-key are one mechanism, header presentation, and this
-//! is its own crate). The legality rule itself, [`is_legal_header_value`](busbar_contract::header::is_legal_header_value),
-//! lives in `busbar-contract` now, a shared pure helper the auth kind's mechanisms use alike.
-//!
-//! What did NOT move: the `Grant<Sign>` / `SecretSlot` / `substitute` indirection. It existed so the
-//! kernel could write a secret onto a request without a plane ever holding it; the auth plugin
-//! holds the credential itself (BUSBAR-1.6.0.md THE DESIGN, §6: "The auth plugin holds it"), so the header is built
-//! here directly — the same bytes `decorate` + `substitute` wrote, which the ported
-//! `*_builder_and_decorated_slot_agree_on_every_key` vectors pin.
+//! table. The legality rule, [`is_legal_header_value`](busbar_contract::header::is_legal_header_value),
+//! is the contract's, shared by every auth mechanism. The plugin holds the credential itself, so the
+//! header is built here directly.
 
-use busbar_contract::header::{is_legal_header_value, token_value};
+use busbar_contract::header::is_legal_header_value;
 use serde::Deserialize;
 use zeroize::Zeroizing;
 
 /// One presented field: its name and its value, the value (credential material) wiped on drop
 /// (BUSBAR-1.6.0.md THE DESIGN §6: "auth material is zeroised").
 pub type Field = (String, Zeroizing<String>);
-
-/// The static bearer credential: `authorization: Bearer <key>`, or NO header when the key carries a
-/// byte that is not a legal header value (the upstream then answers 401). The omission is the whole
-/// policy; reporting it is the caller's ([`crate::instance::note_line`]), and the key is never logged.
-pub fn bearer_auth_headers(key: &str) -> Vec<Field> {
-    if !is_legal_header_value(key) {
-        return Vec::new();
-    }
-    vec![(
-        "authorization".to_string(),
-        Zeroizing::new(token_value(key)),
-    )]
-}
-
-/// The static custom-header credential (`api-key`, `x-goog-api-key`, …) carrying the raw key
-/// verbatim, or NO header when the key carries a byte that is not a legal header value. `header` is
-/// the lowercase header name the style presents under.
-pub fn api_key_auth_headers(header: &str, key: &str) -> Vec<Field> {
-    if !is_legal_header_value(key) {
-        return Vec::new();
-    }
-    vec![(header.to_string(), Zeroizing::new(key.to_string()))]
-}
 
 /// How one static credential is presented (the contract's `CredentialHeader`, as settings data):
 /// `authorization: Bearer <credential>` (`header` absent), or the credential verbatim in `header`,
@@ -174,32 +142,25 @@ impl StaticScheme {
     }
 
     /// Present `credential` in `mode`: the header pairs to attach, or NONE when the credential
-    /// cannot be presented (a byte that is not a legal header value).
+    /// cannot be presented (a byte that is not a legal header value). The owned form of
+    /// [`Self::present_with`].
     pub fn present(&self, credential: &str, mode: Mode) -> Vec<Field> {
-        match self.presentation(credential, mode) {
-            Presentation {
-                header: Some(header),
-                trim_start,
-            } => api_key_auth_headers(
-                header,
-                if *trim_start {
-                    credential.trim_start()
-                } else {
-                    credential
-                },
-            ),
-            Presentation { header: None, .. } => bearer_auth_headers(credential),
-        }
+        let mut fields = Vec::new();
+        self.present_with(credential, mode, |name, value| {
+            let text = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
+            fields.push((text(name), Zeroizing::new(text(value))));
+        });
+        fields
     }
 }
 
 /// The longest bearer value [`StaticScheme::present_with`] stages on the stack.
 pub const STACK_VALUE: usize = 1024;
 
-/// The bearer scheme's prefix, as [`token_value`] writes it.
+/// The bearer scheme's prefix, as `busbar_contract::header::token_value` writes it.
 const BEARER_PREFIX: &[u8] = b"Bearer ";
 
-/// Run `f` over `Bearer <key>` (the bytes [`token_value`] builds), staged on the stack when it
+/// Run `f` over `Bearer <key>` (the bytes `token_value` builds), staged on the stack when it
 /// fits [`STACK_VALUE`], else in a heap buffer; either is wiped when it drops.
 fn with_bearer(key: &str, f: impl FnOnce(&[u8])) {
     let len = BEARER_PREFIX.len() + key.len();

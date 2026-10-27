@@ -41,7 +41,6 @@ fn bearer_builder_presents_every_admitted_key_and_omits_the_rest() {
         } else {
             Vec::new()
         };
-        assert_eq!(bearer_auth_headers(key).plain(), expected, "key {key:?}");
         assert_eq!(
             StaticScheme::uniform(Presentation::BEARER)
                 .present(key, Mode::Own)
@@ -57,18 +56,16 @@ fn bearer_builder_presents_every_admitted_key_and_omits_the_rest() {
 #[test]
 fn custom_header_builder_presents_the_raw_key_under_its_own_name() {
     for &(key, legal) in KEY_VECTORS {
-        let built = api_key_auth_headers("x-goog-api-key", key).plain();
         let expected = if legal {
             vec![("x-goog-api-key".to_string(), key.to_string())]
         } else {
             Vec::new()
         };
-        assert_eq!(built, expected, "builder, key {key:?}");
         assert_eq!(
             StaticScheme::uniform(Presentation::raw("x-goog-api-key"))
                 .present(key, Mode::Own)
                 .plain(),
-            built,
+            expected,
             "the x-goog-api-key style, key {key:?}"
         );
     }
