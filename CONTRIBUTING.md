@@ -41,3 +41,5 @@ cargo test --workspace --locked
 The README's Tests section names any live backend the full suite needs. Add or update
 tests for any behavior change, and update the README when you change behavior or
 config. Keep commits focused and describe what changed, why, and how it was verified.
+
+Development happens on https://git.getbusbar.dev/GetBusbar/busbar-auth-header; the GitHub repository is a read-only mirror.
