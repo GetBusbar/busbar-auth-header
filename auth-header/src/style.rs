@@ -6,7 +6,7 @@
 //! credential mode — the operator's own, or the caller's verified credential
 //! ([`Binding::passthrough`], [`busbar_contract::abi::auth::STYLE_CALLER_CREDENTIAL`]).
 //!
-//! THE SETTINGS SCHEMA (ARCHITECT ruling 2026-09-28): the kernel resolves the dialect's declared
+//! The settings schema: the kernel resolves the dialect's declared
 //! parameters at seal into `OpenOutboundIn::settings`, a JSON object whose shape per style is:
 //!
 //! | style | settings |
@@ -19,18 +19,15 @@
 //! `families` is a dialect's credential-family table, `[{prefix, header?, trim_start?}]` (a row
 //! without `header` presents as a bearer); `own` / `passthrough` are `{header?, trim_start?}`.
 //! `protocol` is the lane's protocol name, which a bearer's and a credential-family table's
-//! unpresentable-credential line names (1.5.5's `protocol=` field; empty when absent).
+//! unpresentable-credential line names (the `protocol=` field; empty when absent).
 //!
-//! THE NOTES: a credential with bytes no header value may carry presents nothing, and raises the
-//! [`Note`] its 1.5.5 builder logged, at WARN, on each request that would have carried it — the
-//! operator's own and a caller's alike (1.5.5 built every credential header per request: v1.5.5
-//! `crates/busbar/src/proxy/egress.rs:122-129`, `crates/busbar/src/proto/mod.rs:61-75`,
-//! `crates/busbar/src/egress_auth/mod.rs:215-229`, `crates/busbar/src/proto/anthropic/mod.rs:1227-1240`).
+//! The notes: a credential with bytes no header value may carry presents nothing, and raises a
+//! [`Note`] at WARN on each request that would have carried it, the operator's own and a caller's
+//! alike.
 //!
-//! THE REFUSALS (ARCHITECT ruling 2026-09-28): a binding that cannot open answers FAILED with one
-//! line per finding, each `credential: <text>` or `settings: <text>`. The kernel composes the 1.5.5
-//! sentence — `provider '<p>' <style> credential (from <src>) is invalid: <text>`, or
-//! `provider '<p>' <text>` — so every `<text>` below is 1.5.5's own words.
+//! The refusals: a binding that cannot open answers FAILED with one line per finding, each
+//! `credential: <text>` or `settings: <text>`. The kernel composes the sentence —
+//! `provider '<p>' <style> credential (from <src>) is invalid: <text>`, or `provider '<p>' <text>`.
 
 use serde::Deserialize;
 use serde_json::{Map, Value};
@@ -82,7 +79,7 @@ pub enum Note {
     /// the header.
     Family(String, String),
     /// A query-parameter credential ([`QUERY_KEY`]) omitted for invalid bytes, naming the
-    /// parameter. No 1.5.5 builder presented a query parameter, so its line names what it omitted.
+    /// parameter.
     Query(String),
 }
 
@@ -120,9 +117,7 @@ impl Binding {
         &self.own
     }
 
-    /// The note the binding's own credential raises on EACH request it presents nothing for: 1.5.5
-    /// built the header per request and logged its builder's line each time (v1.5.5
-    /// `crates/busbar/src/proxy/egress.rs:122-129` `lane_auth_headers` → `headers_for`).
+    /// The note the binding's own credential raises on EACH request it presents nothing for.
     pub fn own_note(&self) -> Option<&Note> {
         self.own_note.as_ref()
     }
@@ -236,8 +231,8 @@ fn static_scheme(style: &str, m: &Map<String, Value>) -> Result<StaticScheme, Re
 
 /// A header name the settings supply (`setting`), judged here: the host checks a plane's fields
 /// only, so a name this plugin presents is its own to hold to an RFC 9110 token. Any case is
-/// accepted and the name is lower-cased as it is read, the field lines' own spelling: 1.5.5 loaded
-/// `header: X-API-Key` and presented `x-api-key` (its header type lower-cased every name). A name
+/// accepted and the name is lower-cased as it is read, the field lines' own spelling: `header: X-API-Key`
+/// is presented as `x-api-key`. A name
 /// that is no token is refused at open, naming the setting.
 fn header_name(setting: &str, p: &mut Presentation) -> Result<(), Refusal> {
     let Some(name) = p.header.as_mut() else {
@@ -281,7 +276,7 @@ fn unpresented(
 ///
 /// # Errors
 ///
-/// Every finding that refuses the binding, in 1.5.5's check order.
+/// Every finding that refuses the binding, in check order.
 pub fn open_binding(
     style: &str,
     credential: Option<&[u8]>,
@@ -301,7 +296,7 @@ pub fn open_binding(
     let protocol = text(&m, "protocol")
         .map_err(|r| vec![r])?
         .unwrap_or_default();
-    // NO CREDENTIAL ⇒ NO AUTH HEADER (1.5.5's `prebuild_auth`): an empty key is a keyless upstream
+    // NO CREDENTIAL ⇒ NO AUTH HEADER: an empty key is a keyless upstream
     // (`api_key: none`), and an empty `Authorization: Bearer ` is strictly worse than nothing.
     let credential_text = credential_text.unwrap_or("");
     let own = if credential_text.is_empty() {

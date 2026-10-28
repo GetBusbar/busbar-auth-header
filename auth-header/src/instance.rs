@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2026 Busbar Inc and contributors
 
-//! ONE INSTANCE: the handles (generation data), served through the SDK's safe outbound door kit
+//! One instance: the handles (generation data), served through the SDK's safe outbound door kit
 //! ([`OutboundPlugin`]). No token cache, no waker, no waiting tickets: a header binding never mints
 //! and never pends.
 //!
 //! Every answer's own memory (an error text, the envelope's diagnostics) is the kit's, kept by the
 //! instance that answered (`busbar_contract::abi::sdk::out`): this crate holds no per-thread and
-//! no process-global state (THE DESIGN §2).
+//! no process-global state.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -27,17 +27,17 @@ use crate::style::{self, Binding, Note};
 
 /// The index of each diagnostic id in the Statement (`crate::DIAG_IDS`).
 pub(crate) mod diag {
-    /// A static header omitted for invalid bytes (1.5.5 `EGRESS_APIKEY_INVALID_BYTES`).
+    /// A static header omitted for invalid bytes.
     pub const APIKEY_INVALID_BYTES: u32 = 0;
-    /// A bearer omitted for invalid bytes (1.5.5 `PROTO_AUTH_INVALID_HEADER_BYTES`).
+    /// A bearer omitted for invalid bytes.
     pub const AUTH_INVALID_HEADER_BYTES: u32 = 1;
     /// A credential-family table's credential omitted for invalid bytes.
     pub const CREDENTIAL_INVALID_BYTES: u32 = 2;
 }
 
-/// The flags every header field this plugin writes carries: NONE. 1.5.5 sent its credential
-/// headers indexable, and an h2 encoder that honoured `FIELD_SENSITIVE` would send them
-/// never-indexed — different bytes (ARCHITECT ruling 2026-09-28, Q4: the 1.5.5 bytes win).
+/// The flags every header field this plugin writes carries: NONE. Credential headers go
+/// out indexable, and an h2 encoder that honoured `FIELD_SENSITIVE` would send them never-indexed,
+/// which is different bytes on the wire.
 const FIELD_FLAGS: u32 = 0;
 
 /// The refusal of plugin settings that are not a JSON object.
@@ -61,9 +61,9 @@ fn settings(b: &[u8]) -> Result<(), Refusal> {
     }
 }
 
-/// The diagnostic a note raises, in the line 1.5.5's builder logged: the message, then the line's
-/// named values as ` name=value` in 1.5.5's order (`protocol`, then `header`). The host writes a
-/// declared diagnostic to the plugin's main log in that shape (BUSBAR-1.6.0.md #85).
+/// The diagnostic a note raises: the message, then the line's named values as ` name=value`
+/// (`protocol`, then `header`). The host writes a declared diagnostic to the plugin's main log in
+/// that shape.
 pub(crate) fn note_line(n: &Note) -> (u32, u8, String) {
     match n {
         Note::Header(header) => (
@@ -153,8 +153,8 @@ impl OutboundPlugin for Header {
     }
 
     /// Bind a style; FAILED carries one `credential: …` / `settings: …` line per finding
-    /// (ARCHITECT ruling 2026-09-28). An own credential no header value may carry opens (1.5.5
-    /// sent the request with no auth header) and is noted on each request, by `fields`.
+    /// An own credential no header value may carry opens (the request goes with no auth header) and
+    /// is noted on each request, by `fields`.
     fn open_outbound(
         &self,
         style: &str,
@@ -174,13 +174,13 @@ impl OutboundPlugin for Header {
         }
     }
 
-    /// THE ONE PER-REQUEST CALL, both credential modes. Each field is handed to the SDK writer by
+    /// The one per-request call, both credential modes. Each field is handed to the SDK writer by
     /// reference (the binding's own straight from where it is held, under the read lock; a
     /// caller's as the bytes it arrived in), and the writer COPIES it into its own staging buffer,
     /// a `Zeroizing<Vec<u8>>` wiped when the call ends (busbar-contract
     /// `abi/sdk/auth_outbound.rs`, `FieldsWriter::push` staging name and value into `staged`), until
     /// it is written into the host's field buffer. This plugin makes no copy of its own on the
-    /// presentable path (§6: "auth material is zeroised").
+    /// presentable path: auth material is zeroised.
     fn fields(
         &self,
         request: &FieldsView<'_>,
@@ -194,8 +194,8 @@ impl OutboundPlugin for Header {
                 for (name, value) in b.own() {
                     out.push(name.as_bytes(), value.as_bytes(), flags);
                 }
-                // The operator's own credential no header value may carry: 1.5.5 built its header
-                // per request and logged its builder's line each time, so this call reports it.
+                // The operator's own credential no header value may carry: reported on each
+                // request it presents nothing for.
                 if let Some(note) = b.own_note() {
                     let (id, severity, text) = note_line(note);
                     out.diag(id, severity, text);
@@ -209,7 +209,7 @@ impl OutboundPlugin for Header {
                     // its scheme's builder raises for any unpresentable credential (classified on
                     // a lossy reading; the note names the protocol and header, never the bytes).
                     // The reading is a copy of the caller's credential, so it is wiped on drop
-                    // (§6: "auth material is zeroised"); only this refused case makes it.
+                    // (auth material is zeroised); only this refused case makes it.
                     if !raw.is_empty() && caller.is_empty() {
                         // Built into a buffer sized for the worst case up front (every byte one
                         // replacement character, three bytes), so it never reallocates and leaves
@@ -233,8 +233,8 @@ impl OutboundPlugin for Header {
                     let presented = b.present_passthrough(caller, |name, value| {
                         out.push(name, value, flags);
                     });
-                    // A caller's credential no header value may carry: 1.5.5 logged its builder's
-                    // line on each request that presented it, so this call reports it.
+                    // A caller's credential no header value may carry: reported on each request
+                    // that presents nothing.
                     if !presented {
                         if let Some(note) = b.passthrough_note(caller) {
                             let (id, severity, text) = note_line(&note);

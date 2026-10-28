@@ -3,7 +3,6 @@
 
 //! # busbar-auth-header — the header-presentation auth styles, one auth-kind plugin
 //!
-//! BUSBAR-1.6.0.md THE DESIGN, §6 (OWNER-LOCKED 2026-09-27, split by mechanism per ARCHITECT ruling 2026-09-29):
 //! *"bearer"*, *"api-key"* and *"x-goog-api-key"* are ONE mechanism — a credential presented
 //! verbatim in an HTTP header, either the `authorization` bearer scheme or a raw custom header —
 //! and live in one plugin, `busbar-auth-header`, loaded when some provider uses one of them. Its
@@ -17,23 +16,23 @@
 //!   serves BOTH credential modes a style with [`busbar_contract::abi::auth::STYLE_CALLER_CREDENTIAL`]
 //!   declares: the operator's own bound credential ([`busbar_contract::abi::auth::MODE_OWN`]), and the
 //!   caller's verified credential passed per-request
-//!   ([`busbar_contract::abi::auth::MODE_PASSTHROUGH`]) — ARCHITECT ruling 2026-09-29: a credential
-//!   SOURCE is not a mechanism, so there is no separate `caller-credential` style; each mechanism
-//!   plugin serves both modes of its own styles.
+//!   ([`busbar_contract::abi::auth::MODE_PASSTHROUGH`]). A credential SOURCE is not a mechanism, so
+//!   there is no separate `caller-credential` style; each mechanism plugin serves both modes of its
+//!   own styles.
 //! * `outbound_ready` is the handle's `ready` fact for the health prober: always ready — a header
 //!   binding never mints.
 //! * `tick` does nothing: nothing here refreshes ahead of a deadline.
 //!
-//! EACH BINDING BUILDS ITS HEADER ONCE, AT `open_outbound` (BUSBAR-1.6.0.md §6.5, [`style::Binding`]). The kernel
+//! Each binding builds its header once, at `open_outbound` ([`style::Binding`]). The kernel
 //! holds no auth cache and does no per-plugin branching.
 //!
-//! THE DOOR is the contract SDK's safe outbound door kit (`auth_outbound_door!` over
+//! The door is the contract SDK's safe outbound door kit (`auth_outbound_door!` over
 //! `instance::Header`, an `OutboundPlugin`): the kit reads the host's frames, writes the fields
 //! under the short-buffer rule and keeps every answer's memory in the answering instance, so this
-//! crate is `#![forbid(unsafe_code)]` and holds no per-thread or process-global state (THE DESIGN
-//! §2). The inbound operations (`verify`, the login pair) are not served and answer REFUSED (the
-//! tail declares only `CAP_OUTBOUND`). Its Statement also states the host's default inbound style:
-//! the lines a caller's credential sits on (busbar row 159, K3#1).
+//! crate is `#![forbid(unsafe_code)]` and holds no per-thread or process-global state. The
+//! inbound operations (`verify`, the login pair) are not served and answer REFUSED (the tail
+//! declares only `CAP_OUTBOUND`). Its Statement also states the host's default inbound style: the
+//! lines a caller's credential sits on.
 
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
@@ -52,9 +51,9 @@ use busbar_contract::abi::sdk::auth_outbound::{outbound_tail, style as declare};
 use busbar_contract::abi::sdk::door::{abi_str, statement};
 
 /// The styles, as the tail declares them: every one of them also serves the caller's verified
-/// credential, and reads nothing past the head. 1.5.5's two header styles are RANKED first, in
-/// 1.5.5's order (busbar arch-audit u29 F1): the host lists the words a provider's `auth:` may name
-/// ranked first, so 1.5.5's refusal of an unknown word stays the prefix of the host's.
+/// credential, and reads nothing past the head. The two long-standing header styles (`bearer`,
+/// `api-key`) are RANKED first: the host lists the words a provider's `auth:` may name ranked first,
+/// so the refusal of an unknown word keeps the same prefix.
 const STYLE_DECLS: &[StyleDecl] = &[
     declare(
         style::BEARER,
@@ -74,8 +73,8 @@ const STYLE_DECLS: &[StyleDecl] = &[
     declare(style::QUERY_KEY, STYLE_CALLER_CREDENTIAL, AuthPoints::HEAD),
 ];
 
-/// THE HOST'S DEFAULT INBOUND STYLE's lines (busbar row 159, K3#1): where a caller's credential sits
-/// on every line the operator's config leaves without a style, in 1.5.5's precedence order: the
+/// The host's default inbound style's lines: where a caller's credential sits
+/// on every line the operator's config leaves without a style, in precedence order: the
 /// Bearer on `authorization`, then the raw key on `x-api-key` (the Anthropic SDK's line), then on
 /// `x-goog-api-key` (the Gemini SDK's). The host walks them in this order and strips all three from
 /// what a plane sees; busbar's core names none of them.
@@ -88,13 +87,12 @@ const CARRIERS: [MarkWord; 3] = [
     carrier(CARRIER_LINES[2]),
 ];
 
-/// THE AUTH STATEMENT TAIL: outbound styles, no login, and the host's default inbound style (the
+/// The auth Statement tail: outbound styles, no login, and the host's default inbound style (the
 /// Statement's carrier marks, [`CARRIERS`]); `verify` is not served.
 const TAIL: &AuthTail = &outbound_tail(FACT_DEFAULT_INBOUND_STYLE, STYLE_DECLS);
 
-/// The diagnostic ids, in `instance::diag` order: 1.5.5's catalog codes where the line had one.
-/// `BUSBAR-4013` covers both egress-credential lines that omit an api-key credential: the header
-/// line 1.5.5 logged, and the query-parameter line (a style 1.5.5 did not present), which says
+/// The diagnostic ids, in `instance::diag` order. `BUSBAR-4013` covers both egress-credential lines
+/// that omit an api-key credential: the header line, and the query-parameter line, which says
 /// `param=` where the header line says `header=`; the named value tells the two apart.
 const DIAG_IDS: &[AbiStr] = &[
     abi_str("BUSBAR-4013"),
