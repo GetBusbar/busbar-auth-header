@@ -11,7 +11,7 @@ use serde::Deserialize;
 use zeroize::Zeroizing;
 
 /// One presented field: its name and its value, the value (credential material) wiped on drop
-/// (BUSBAR-1.6.0.md THE DESIGN §6: "auth material is zeroised").
+/// (auth material is zeroised).
 pub type Field = (String, Zeroizing<String>);
 
 /// How one static credential is presented (the contract's `CredentialHeader`, as settings data):
@@ -102,8 +102,8 @@ impl StaticScheme {
             })
     }
 
-    /// Present `credential` in `mode` BY REFERENCE, the per-request path (THE DESIGN §11.2: "no
-    /// allocation and no blocking on the hot path"): `emit(name, value)` once, with the bytes
+    /// Present `credential` in `mode` BY REFERENCE, the per-request path (no
+    /// allocation and no blocking on the hot path): `emit(name, value)` once, with the bytes
     /// [`Self::present`] builds, or never when the credential cannot be presented. A raw value is
     /// the credential's own bytes; a bearer value is built on the stack (wiped when it drops) up
     /// to [`STACK_VALUE`] bytes, in a zeroised heap buffer only past that. What `emit` does with
