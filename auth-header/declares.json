@@ -1,7 +1,7 @@
 {
   "diagnostics": [
     {
-      "code": 4013,
+      "code": 4031,
       "slug": "egress-apikey-invalid-bytes",
       "title": "Egress API key contains invalid header bytes (auth header omitted)",
       "severity": "actionable",
@@ -19,7 +19,7 @@
       "since": "1.6.0"
     },
     {
-      "code": 7087,
+      "code": 7110,
       "slug": "proto-auth-invalid-header-bytes",
       "title": "Egress credential has invalid header bytes (auth header omitted)",
       "severity": "actionable",
