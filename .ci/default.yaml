@@ -8,7 +8,7 @@ deadline: 2h
 env:
   PLUGIN_REPO: "busbar-auth-header"
   PLUGIN_SERVICE: "none"
-  PLUGIN_BUSBAR_CHECKOUT: "false"
+  PLUGIN_BUSBAR_CHECKOUT: "true"
   PLUGIN_EXTRA_TEST: ""
   PLUGIN_CRATE: "busbar-auth-header-plugin"
   PLUGIN_KIND: "auth"
