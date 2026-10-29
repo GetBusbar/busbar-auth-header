@@ -21,7 +21,7 @@ use busbar_contract::abi::sdk::auth_outbound::{
 };
 use busbar_contract::abi::sdk::conn::Host;
 use busbar_contract::abi::sdk::exchange::Op;
-use busbar_contract::abi::sdk::life::Refusal;
+use busbar_contract::abi::sdk::life::{self, Refusal};
 
 use crate::style::{self, Binding, Note};
 
@@ -45,16 +45,8 @@ pub(crate) const SETTINGS_NOT_OBJECT: &str = "busbar-auth-header settings must b
 
 /// The plugin's own settings: none are read; present settings must be a JSON object (empty bytes
 /// are absent settings).
-fn settings_ok(b: &[u8]) -> bool {
-    b.is_empty()
-        || matches!(
-            serde_json::from_slice::<serde_json::Value>(b),
-            Ok(serde_json::Value::Object(_))
-        )
-}
-
 fn settings(b: &[u8]) -> Result<(), Refusal> {
-    if settings_ok(b) {
+    if life::settings_object(b).is_ok() {
         Ok(())
     } else {
         Err(Refusal::refused(SETTINGS_NOT_OBJECT))
