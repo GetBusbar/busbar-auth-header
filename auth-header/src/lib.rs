@@ -127,3 +127,7 @@ pub mod compiled_in {
 #[cfg(test)]
 #[path = "tests/statement_tests.rs"]
 mod statement_tests;
+
+#[cfg(test)]
+#[path = "tests/catalogue_tests.rs"]
+mod catalogue_tests;
