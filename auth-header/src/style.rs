@@ -35,7 +35,7 @@ use busbar_contract::abi::sdk::auth_kit::json_error;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
-use crate::present::{Family, Mode, Presentation, StaticScheme};
+use crate::present::{trim_ows, Family, Mode, Presentation, StaticScheme};
 
 /// `authorization: Bearer <credential>`.
 pub const BEARER: &str = "bearer";
@@ -184,7 +184,7 @@ impl Binding {
     /// The note for a caller's `credential` that [`Self::passthrough`] presented as nothing; none
     /// for an empty one (no credential, nothing to report).
     pub fn passthrough_note(&self, credential: &str) -> Option<Note> {
-        (!credential.is_empty()).then(|| {
+        (!trim_ows(credential).is_empty()).then(|| {
             unpresented(
                 &self.scheme,
                 credential,
@@ -344,13 +344,14 @@ pub fn open_binding(
         .unwrap_or_default();
     // NO CREDENTIAL ⇒ NO AUTH HEADER: an empty key is a keyless upstream
     // (`api_key: none`), and an empty `Authorization: Bearer ` is strictly worse than nothing.
+    // (blank after trimming SP/HTAB counts as empty: a field value never carries them).
     let credential_text = credential_text.unwrap_or("");
-    let own = if credential_text.is_empty() {
+    let own = if trim_ows(credential_text).is_empty() {
         Vec::new()
     } else {
         scheme.present(credential_text, Mode::Own)
     };
-    let own_note = (!credential_text.is_empty() && own.is_empty()).then(|| {
+    let own_note = (!trim_ows(credential_text).is_empty() && own.is_empty()).then(|| {
         unpresented(
             &scheme,
             credential_text,
