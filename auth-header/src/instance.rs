@@ -133,13 +133,16 @@ impl Header {
     }
 
     /// Keep `binding` under a new handle of the current generation.
+    ///
+    /// THE LOCK RULE: the generation is read, and the handle stored, under the handles WRITE lock;
+    /// [`OutboundPlugin::refresh`] stores the new generation under that same lock and
+    /// [`OutboundPlugin::retire`] sweeps under it. The three are therefore ordered: a handle can
+    /// never be stored under a generation a retire has already swept (it would then never drop).
     pub(crate) fn keep(&self, binding: Binding) -> u64 {
         let handle = self.next_handle.fetch_add(1, Ordering::Relaxed);
+        let mut handles = self.handles.write().unwrap_or_else(PoisonError::into_inner);
         let generation = self.generation.load(Ordering::Acquire);
-        self.handles
-            .write()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(handle, (generation, binding));
+        handles.insert(handle, (generation, binding));
         handle
     }
 
@@ -304,6 +307,8 @@ impl OutboundPlugin for Header {
     /// The new generation, later handles belong to.
     fn refresh(&self, b: &[u8], _secrets: &[&[u8]], generation: u64) -> Result<(), Refusal> {
         settings(b)?;
+        // Under the handles write lock (the lock rule, see `keep`).
+        let _handles = self.handles.write().unwrap_or_else(PoisonError::into_inner);
         self.generation.store(generation, Ordering::Release);
         Ok(())
     }
