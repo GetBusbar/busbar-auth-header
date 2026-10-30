@@ -446,3 +446,17 @@ fn a_blank_top_level_string_setting_is_refused_by_name() {
         assert!(open(style, Some("k"), &settings).0.is_ok(), "{settings}");
     }
 }
+
+/// F3: a `families` row whose `prefix` is empty (or whitespace) would capture every credential; it
+/// is refused by name.
+#[test]
+fn a_blank_family_prefix_is_refused_by_name() {
+    for prefix in ["", " ", "\t"] {
+        let settings = format!(r#"{{"families":[{{"prefix":"sk-"}},{{"prefix":"{prefix}"}}]}}"#);
+        assert_eq!(
+            lines(open(BEARER, Some("k"), &settings).0),
+            ["settings: outbound auth setting `families[1].prefix` must not be blank"],
+            "{settings}"
+        );
+    }
+}
