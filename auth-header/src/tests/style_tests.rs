@@ -460,3 +460,30 @@ fn a_blank_family_prefix_is_refused_by_name() {
         );
     }
 }
+
+/// F4: `param` is a non-empty RFC 3986 unreserved-or-token name (no CTL, SP, `=`, `&`, `#`), and
+/// `protocol` carries no control character, so neither reaches a log line as injected text.
+#[test]
+fn param_and_protocol_are_validated() {
+    for bad in ["a b", "a=b", "a&b", "a#b", "a\\nb", "a\\u0000b", "a\\u007fb", "é"] {
+        let settings = format!(r#"{{"param":"{bad}"}}"#);
+        assert_eq!(
+            lines(open(QUERY_KEY, Some("k"), &settings).0),
+            ["settings: outbound auth setting `param` is not a query parameter name"],
+            "{settings}"
+        );
+    }
+    for good in ["key", "api_key", "api-key", "X.Key~1"] {
+        let settings = format!(r#"{{"param":"{good}"}}"#);
+        assert!(open(QUERY_KEY, Some("k"), &settings).0.is_ok(), "{settings}");
+    }
+    for bad in ["a\\nb", "a\\r\\nb", "a\\u0000b", "a\\u001bb", "a\\u007fb"] {
+        let settings = format!(r#"{{"protocol":"{bad}"}}"#);
+        assert_eq!(
+            lines(open(BEARER, Some("k"), &settings).0),
+            ["settings: outbound auth setting `protocol` has a control character"],
+            "{settings}"
+        );
+    }
+    assert!(open(BEARER, Some("k"), r#"{"protocol":"open ai-1"}"#).0.is_ok());
+}
