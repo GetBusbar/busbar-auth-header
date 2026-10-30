@@ -224,9 +224,17 @@ fn field<T: for<'de> Deserialize<'de>>(
     }
 }
 
-/// A non-blank string setting.
+/// A string setting: absent (or null) is `None`; present but blank is refused by name.
 fn text(m: &Map<String, Value>, key: &str) -> Result<Option<String>, Refusal> {
-    Ok(field::<String>(m, key)?.filter(|s| !s.trim().is_empty()))
+    match field::<String>(m, key)? {
+        Some(s) if s.trim().is_empty() => Err(blank(key)),
+        other => Ok(other),
+    }
+}
+
+/// The refusal for a blank string setting (`setting`: its name as the operator wrote it).
+fn blank(setting: &str) -> Refusal {
+    Refusal::Settings(format!("outbound auth setting `{setting}` must not be blank"))
 }
 
 /// A style's scheme: its default presentation, overridden by the settings.
