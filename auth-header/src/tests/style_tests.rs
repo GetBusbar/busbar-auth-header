@@ -381,3 +381,42 @@ fn an_unknown_settings_key_is_refused_by_name() {
         assert!(open(style, Some("k"), provider).0.is_ok(), "{style}");
     }
 }
+
+/// F1: A FIELD VALUE NEVER HAS LEADING OR TRAILING WHITESPACE (RFC 9110 §5.5; a receiver strips OWS).
+/// Every presentation (raw, bearer, query; own and passthrough) presents the credential with
+/// surrounding SP/HTAB removed, `trim_start` or not, and a credential blank after trimming presents
+/// nothing and raises no note.
+#[test]
+fn a_credential_is_presented_without_surrounding_whitespace() {
+    let pair = |n: &str, v: &str| vec![(n.to_string(), v.to_string())];
+    for (style, settings, name, value) in [
+        (API_KEY, "{}", "api-key", "sk-1"),
+        (BEARER, "{}", "authorization", "Bearer sk-1"),
+        (X_GOOG_API_KEY, "{}", "x-goog-api-key", "sk-1"),
+        (QUERY_KEY, "{}", "key", "sk-1"),
+        (
+            API_KEY,
+            r#"{"own":{"header":"api-key","trim_start":true}}"#,
+            "api-key",
+            "sk-1",
+        ),
+    ] {
+        let (b, _) = open(style, Some(" \t sk-1 \t "), settings);
+        let b = b.expect("opens");
+        assert_eq!(b.own().plain(), pair(name, value), "own {style} {settings}");
+        assert_eq!(
+            b.passthrough("\t sk-1  ").plain(),
+            pair(name, value),
+            "passthrough {style} {settings}"
+        );
+    }
+    for style in [BEARER, API_KEY, QUERY_KEY] {
+        let (b, notes) = open(style, Some(" \t "), "{}");
+        let b = b.expect("opens");
+        assert!(b.own().is_empty(), "{style}: a blank credential presents nothing");
+        assert!(notes.is_empty(), "{style}: and is no unpresentable credential");
+        assert!(b.passthrough(" \t").is_empty());
+        assert!(!b.present_passthrough("  ", |_, _| panic!("emitted")));
+        assert_eq!(b.passthrough_note("  "), None);
+    }
+}
