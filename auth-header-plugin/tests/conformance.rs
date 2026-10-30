@@ -399,7 +399,7 @@ fn script(p: &Plugin<Auth>) -> Vec<String> {
 /// `credential:` / `settings:` refusal lines, the short-buffer re-call, the caller-mode
 /// presentation (ARCHITECT ruling 2026-09-29), the expired handle.
 const EXPECTED: &[&str] = &[
-    "validate [1] Refused busbar-auth-header settings must be a JSON object",
+    "validate [1] Failed settings: must be a JSON object",
     "validate Ready",
     "open Ready",
     "open_outbound bearer Ready ",

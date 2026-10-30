@@ -71,6 +71,13 @@ fn style_keys(style: &str) -> Option<&'static [&'static str]> {
     }
 }
 
+/// Whether some style reads `key`, or the kernel writes it into every style's settings.
+pub(crate) fn known_key(key: &str) -> bool {
+    [RAW_KEYS, QUERY_KEYS, PROVIDER_KEYS]
+        .iter()
+        .any(|keys| keys.contains(&key))
+}
+
 /// One refusal per key `style` does not read, naming it, in the settings' key order.
 fn unknown_keys(m: &Map<String, Value>, keys: &[&str]) -> Vec<Refusal> {
     m.keys()

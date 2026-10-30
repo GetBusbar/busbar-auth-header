@@ -40,16 +40,21 @@ pub(crate) mod diag {
 /// which is different bytes on the wire.
 const FIELD_FLAGS: u32 = 0;
 
-/// The refusal of plugin settings that are not a JSON object.
-pub(crate) const SETTINGS_NOT_OBJECT: &str = "busbar-auth-header settings must be a JSON object";
-
-/// The plugin's own settings: none are read; present settings must be a JSON object (empty bytes
-/// are absent settings).
+/// The plugin's own settings, judged alike at `validate`, `open` and `refresh`: none are read. The
+/// instance is opened over a binding's settings, so present settings must be a JSON object whose
+/// every key some style reads ([`style::known_key`]); anything else is FAILED, one
+/// `settings.<key>: unknown key` line per key.
 fn settings(b: &[u8]) -> Result<(), Refusal> {
-    if life::settings_object(b).is_ok() {
+    let m = life::settings_object(b)?;
+    let unknown: Vec<String> = m
+        .keys()
+        .filter(|k| !style::known_key(k))
+        .map(|k| format!("settings.{k}: unknown key"))
+        .collect();
+    if unknown.is_empty() {
         Ok(())
     } else {
-        Err(Refusal::refused(SETTINGS_NOT_OBJECT))
+        Err(Refusal::failed(unknown.join("\n")))
     }
 }
 

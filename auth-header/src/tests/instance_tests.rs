@@ -65,7 +65,10 @@ fn bad_settings_fail_alike_at_validate_open_and_refresh() {
             check_validate_refusal(text.as_bytes()).expect("the contract's line form");
         }
         h.retire(1);
-        assert!(!h.outbound_ready(handle), "the refused refresh moved no generation");
+        assert!(
+            !h.outbound_ready(handle),
+            "the refused refresh moved no generation"
+        );
     }
     for good in [
         &b""[..],
