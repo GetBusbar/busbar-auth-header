@@ -346,7 +346,10 @@ fn an_unknown_settings_key_is_refused_by_name() {
     );
     assert_eq!(
         lines(open(BEARER, Some("k"), r#"{"header":"x-api-key","param":"key"}"#).0),
-        ["settings: unknown key `header`", "settings: unknown key `param`"]
+        [
+            "settings: unknown key `header`",
+            "settings: unknown key `param`"
+        ]
     );
     assert_eq!(
         lines(open(QUERY_KEY, Some("k"), r#"{"header":"x"}"#).0),
@@ -368,7 +371,10 @@ fn an_unknown_settings_key_is_refused_by_name() {
         (QUERY_KEY, r#"{"param":"key"}"#),
     ];
     for (style, settings) in dialects {
-        assert!(open(style, Some("k"), settings).0.is_ok(), "{style} {settings}");
+        assert!(
+            open(style, Some("k"), settings).0.is_ok(),
+            "{style} {settings}"
+        );
     }
     for style in [BEARER, API_KEY, X_GOOG_API_KEY, QUERY_KEY] {
         let provider = r#"{"token_url":"https://t.example/","token_uri":"https://u.example/","scope":"s","subject":"x"}"#;
