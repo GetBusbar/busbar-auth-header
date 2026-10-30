@@ -176,7 +176,23 @@ impl OutboundPlugin for Header {
     ) -> Result<u64, OpenRefusal> {
         let opened = style::open_binding(style, credential, settings);
         match opened {
-            Ok(binding) => Ok(self.keep(binding)),
+            Ok(binding) => {
+                // An own credential no header value may carry opens (the request goes without an
+                // auth header); say so once here, by the names the operator configured, never the
+                // credential. Each request raises its own note besides.
+                if let Some(note) = binding.own_note() {
+                    let (header, protocol) = note.names();
+                    tracing::info!(
+                        module = "header",
+                        style,
+                        reason = "unpresentable_credential",
+                        header,
+                        protocol,
+                        "header binding opened with a credential it cannot present"
+                    );
+                }
+                Ok(self.keep(binding))
+            }
             Err(refusals) => {
                 let lines: Vec<String> = refusals.iter().map(style::Refusal::line).collect();
                 // The lines name a setting or the credential's encoding, never a value.

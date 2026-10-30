@@ -122,6 +122,17 @@ pub enum Note {
     Query(String),
 }
 
+impl Note {
+    /// The names the note carries, as `(header or parameter, protocol)`; empty where it names none.
+    pub fn names(&self) -> (&str, &str) {
+        match self {
+            Note::Header(h) | Note::Query(h) => (h, ""),
+            Note::Bearer(p) => ("", p),
+            Note::Family(p, h) => (h, p),
+        }
+    }
+}
+
 /// One open binding: the scheme, the fields its own credential presents (built once), and the
 /// protocol its notes name.
 pub struct Binding {
