@@ -118,7 +118,9 @@ pub enum Note {
     /// the header.
     Family(String, String),
     /// A query-parameter credential ([`QUERY_KEY`]) omitted for invalid bytes, naming the
-    /// parameter.
+    /// parameter. It raises the same diagnostic id as [`Note::Header`] (`BUSBAR-4013`, whose text
+    /// is about an omitted api-key credential); the line says `param=` where that one says
+    /// `header=`.
     Query(String),
 }
 
@@ -245,7 +247,9 @@ fn text(m: &Map<String, Value>, key: &str) -> Result<Option<String>, Refusal> {
 
 /// The refusal for a blank string setting (`setting`: its name as the operator wrote it).
 fn blank(setting: &str) -> Refusal {
-    Refusal::Settings(format!("outbound auth setting `{setting}` must not be blank"))
+    Refusal::Settings(format!(
+        "outbound auth setting `{setting}` must not be blank"
+    ))
 }
 
 /// Whether `name` is a query parameter name this plugin will present: non-empty, an RFC 9110 token

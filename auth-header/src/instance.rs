@@ -27,7 +27,8 @@ use crate::style::{self, Binding, Note};
 
 /// The index of each diagnostic id in the Statement (`crate::DIAG_IDS`).
 pub(crate) mod diag {
-    /// A static header omitted for invalid bytes.
+    /// A static header, or a query parameter ([`Note::Query`]), omitted for invalid bytes
+    /// (`BUSBAR-4013`; the named value, `header=` or `param=`, tells the two apart).
     pub const APIKEY_INVALID_BYTES: u32 = 0;
     /// A bearer omitted for invalid bytes.
     pub const AUTH_INVALID_HEADER_BYTES: u32 = 1;

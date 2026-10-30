@@ -103,6 +103,11 @@ const DIAG_IDS: &[AbiStr] = &[
     abi_str(DIAG_CODES[2]),
 ];
 
+/// The concurrency the plugin states: calls the host may run on one instance at once. The instance
+/// holds only a read-mostly handle table, so this is the host's ceiling for a plugin, not a
+/// resource of ours.
+const CONCURRENCY: u32 = 1024;
+
 /// What the plugin states: its name, version, concurrency, diagnostics and auth tail.
 const STATEMENT: Statement = with_tail(
     Statement {
@@ -110,7 +115,7 @@ const STATEMENT: Statement = with_tail(
         diag_ids_len: DIAG_IDS.len(),
         mark_words: CARRIERS.as_ptr(),
         mark_words_len: CARRIERS.len(),
-        ..statement("busbar-auth-header", env!("CARGO_PKG_VERSION"), 1024)
+        ..statement("busbar-auth-header", env!("CARGO_PKG_VERSION"), CONCURRENCY)
     },
     TAIL,
 );
