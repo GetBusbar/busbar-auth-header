@@ -64,9 +64,18 @@ fn bad_settings_fail_alike_at_validate_open_and_refresh() {
             assert_eq!(r.text(), Some(text));
             check_validate_refusal(text.as_bytes()).expect("the contract's line form");
         }
+        // A handle opened AFTER the refused refreshes carries the OLD generation: retiring the
+        // refused new one keeps it, retiring the old one removes it (a generation stored before
+        // the settings check would put it under 2).
+        let (after, _) = open(&h, style::BEARER, Some("sk-1"), "{}");
+        h.retire(2);
+        assert!(
+            h.outbound_ready(handle) && h.outbound_ready(after),
+            "retiring the refused generation removes nothing"
+        );
         h.retire(1);
         assert!(
-            !h.outbound_ready(handle),
+            !h.outbound_ready(handle) && !h.outbound_ready(after),
             "the refused refresh moved no generation"
         );
     }
@@ -151,13 +160,19 @@ fn note_line_reports_each_note_in_its_own_line() {
 }
 
 /// A caller's credential is presented by reference with the bytes the owned presentation builds,
-/// a bearer longer than the stack stage included; one no header value may carry emits nothing.
+/// a bearer longer than the stack stage included, each against independent literal bytes; one no
+/// header value may carry emits nothing.
 #[test]
 fn a_callers_credential_is_presented_by_reference_with_the_owned_bytes() {
     let h = Header::new(1);
     let (handle, _) = open(&h, style::BEARER, None, "{}");
     let long = "k".repeat(crate::present::STACK_VALUE * 2);
-    for caller in ["caller-tok", long.as_str()] {
+    assert!(long.len() + "Bearer ".len() > crate::present::STACK_VALUE, "the heap branch");
+    let long_expected = format!("Bearer {}", "k".repeat(2048));
+    for (caller, expected) in [
+        ("caller-tok", "Bearer caller-tok"),
+        (long.as_str(), long_expected.as_str()),
+    ] {
         let by_ref = h
             .with_binding(handle, |b| {
                 let mut got = None;
@@ -172,8 +187,11 @@ fn a_callers_credential_is_presented_by_reference_with_the_owned_bytes() {
         let owned = h
             .with_binding(handle, |b| b.passthrough(caller))
             .expect("the binding");
-        assert_eq!(by_ref.0, owned[0].0.as_bytes());
-        assert_eq!(by_ref.1, owned[0].1.as_bytes());
+        assert_eq!(by_ref.0, b"authorization");
+        assert_eq!(by_ref.1, expected.as_bytes());
+        assert_eq!(owned.len(), 1);
+        assert_eq!(owned[0].0, "authorization");
+        assert_eq!(owned[0].1.as_str(), expected);
     }
     let none = h.with_binding(handle, |b| b.present_passthrough("bad\nkey", |_, _| ()));
     assert_eq!(none, Some(false));
