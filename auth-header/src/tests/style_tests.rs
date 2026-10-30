@@ -420,3 +420,29 @@ fn a_credential_is_presented_without_surrounding_whitespace() {
         assert_eq!(b.passthrough_note("  "), None);
     }
 }
+
+/// F2: a present-but-blank top-level `header` / `param` / `protocol` is refused by name like the
+/// nested ones; absent (or null) keeps the default.
+#[test]
+fn a_blank_top_level_string_setting_is_refused_by_name() {
+    for (style, key) in [
+        (API_KEY, "header"),
+        (X_GOOG_API_KEY, "header"),
+        (QUERY_KEY, "param"),
+        (BEARER, "protocol"),
+        (API_KEY, "protocol"),
+    ] {
+        for blank in ["", "  ", "\t"] {
+            let settings = format!(r#"{{"{key}":"{blank}"}}"#);
+            assert_eq!(
+                lines(open(style, Some("k"), &settings).0),
+                [format!(
+                    "settings: outbound auth setting `{key}` must not be blank"
+                )],
+                "{style} {settings}"
+            );
+        }
+        let settings = format!(r#"{{"{key}":null}}"#);
+        assert!(open(style, Some("k"), &settings).0.is_ok(), "{settings}");
+    }
+}
