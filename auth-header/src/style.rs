@@ -29,6 +29,7 @@
 //! `credential: <text>` or `settings: <text>`. The kernel composes the sentence —
 //! `provider '<p>' <style> credential (from <src>) is invalid: <text>`, or `provider '<p>' <text>`.
 
+use busbar_contract::abi::sdk::auth_kit::json_error;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
@@ -166,9 +167,9 @@ fn object(settings: Option<&[u8]>) -> Result<Map<String, Value>, Refusal> {
         Ok(_) => Err(Refusal::Settings(
             "outbound auth settings must be a JSON object".to_string(),
         )),
-        Err(e) => Err(Refusal::Settings(format!(
-            "outbound auth settings are not JSON: {e}"
-        ))),
+        Err(e) => Err(Refusal::Settings(json_error(
+            "outbound auth settings are not JSON",
+        )(e))),
     }
 }
 
@@ -179,7 +180,8 @@ fn field<T: for<'de> Deserialize<'de>>(
     match m.get(key) {
         None | Some(Value::Null) => Ok(None),
         Some(v) => serde_json::from_value(v.clone()).map(Some).map_err(|e| {
-            Refusal::Settings(format!("outbound auth setting `{key}` is invalid: {e}"))
+            let why = json_error("is invalid")(e);
+            Refusal::Settings(format!("outbound auth setting `{key}` {why}"))
         }),
     }
 }
