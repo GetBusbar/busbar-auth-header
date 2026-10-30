@@ -440,12 +440,25 @@ const EXPECTED: &[&str] = &[
     "close Ready",
 ];
 
-/// The folds every build must hand the host: the un-encodable bearer's WARN line on the one request
-/// that would have carried it (1.5.5 logged it per request), naming the bound protocol (none bound
-/// here: empty, as 1.5.5's override named none).
+/// The folds every build must hand the host: each refusal's INFO line (`module = "header"`, its
+/// reason, never a credential: AUTH-STANDARD S5), and the un-encodable bearer's WARN line on the
+/// one request that would have carried it (1.5.5 logged it per request), naming the bound protocol
+/// (none bound here: empty, as 1.5.5's override named none).
 const EXPECTED_FOLDS: &[&str] = &[
+    "diag 4294967295 sev=0 busbar_auth_header::instance: header settings refused \
+     module=\"header\" reason=\"not_object\"",
+    "diag 4294967295 sev=0 busbar_auth_header::instance: header binding refused \
+     module=\"header\" style=\"sigv4\" reason=\"binding_refused\" refusal=settings: outbound \
+     auth style `sigv4` is not served by this plugin",
+    "diag 4294967295 sev=0 busbar_auth_header::instance: header binding refused \
+     module=\"header\" style=\"kerberos\" reason=\"binding_refused\" refusal=settings: \
+     outbound auth style `kerberos` is not served by this plugin",
     "diag 1 sev=1 authorization credential contains invalid header bytes (ASCII control \
      character); omitting auth header — upstream will reject with 401 protocol=",
+    "diag 4294967295 sev=0 busbar_auth_header::instance: header fields refused \
+     module=\"header\" handle=999 reason=\"unknown_handle\"",
+    "diag 4294967295 sev=0 busbar_auth_header::instance: header fields refused \
+     module=\"header\" handle=1 reason=\"unknown_handle\"",
 ];
 
 fn run(p: &Plugin<Auth>, folds: &Folds) -> (Vec<String>, Vec<String>) {

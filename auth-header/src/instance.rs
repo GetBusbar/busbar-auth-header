@@ -45,7 +45,13 @@ const FIELD_FLAGS: u32 = 0;
 /// every key some style reads ([`style::known_key`]); anything else is FAILED, one
 /// `settings.<key>: unknown key` line per key.
 fn settings(b: &[u8]) -> Result<(), Refusal> {
-    let m = life::settings_object(b)?;
+    let m = life::settings_object(b).inspect_err(|_| {
+        tracing::info!(
+            module = "header",
+            reason = "not_object",
+            "header settings refused"
+        );
+    })?;
     let unknown: Vec<String> = m
         .keys()
         .filter(|k| !style::known_key(k))
@@ -54,7 +60,14 @@ fn settings(b: &[u8]) -> Result<(), Refusal> {
     if unknown.is_empty() {
         Ok(())
     } else {
-        Err(Refusal::failed(unknown.join("\n")))
+        let lines = unknown.join("\n");
+        tracing::info!(
+            module = "header",
+            reason = "unknown_key",
+            refusal = %lines,
+            "header settings refused"
+        );
+        Err(Refusal::failed(lines))
     }
 }
 
@@ -164,7 +177,16 @@ impl OutboundPlugin for Header {
         match opened {
             Ok(binding) => Ok(self.keep(binding)),
             Err(refusals) => {
-                let mut lines = refusals.iter().map(style::Refusal::line);
+                let lines: Vec<String> = refusals.iter().map(style::Refusal::line).collect();
+                // The lines name a setting or the credential's encoding, never a value.
+                tracing::info!(
+                    module = "header",
+                    style,
+                    reason = "binding_refused",
+                    refusal = %lines.join("; "),
+                    "header binding refused"
+                );
+                let mut lines = lines.into_iter();
                 let first = lines.next().unwrap_or_default();
                 Err(lines.fold(OpenRefusal::new(first), OpenRefusal::and))
             }
@@ -243,7 +265,15 @@ impl OutboundPlugin for Header {
         };
         Poll::Ready(match answered {
             Some(()) => FieldsAnswer::Ready,
-            None => FieldsAnswer::Refused,
+            None => {
+                tracing::info!(
+                    module = "header",
+                    handle,
+                    reason = "unknown_handle",
+                    "header fields refused"
+                );
+                FieldsAnswer::Refused
+            }
         })
     }
 

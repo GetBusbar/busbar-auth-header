@@ -221,7 +221,10 @@ fn every_refusal_is_logged_once_at_info_without_the_credential() {
     let lines = cap.messages();
     assert_eq!(lines.len(), 5, "{lines:?}");
     for line in &lines {
-        assert!(line.contains("module=\"header\"") || line.contains("module=header"), "{line}");
+        assert!(
+            line.contains("module=\"header\"") || line.contains("module=header"),
+            "{line}"
+        );
         assert!(line.contains("reason="), "{line}");
         assert!(!line.contains("sk-operator-secret"), "{line}");
     }
