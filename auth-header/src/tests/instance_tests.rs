@@ -190,3 +190,41 @@ fn a_bindings_debug_never_prints_its_credential() {
         .expect("the binding");
     assert!(!shown.contains("operator-secret"), "{shown}");
 }
+
+/// EVERY REFUSAL IS LOGGED ONCE AT INFO, `module = "header"`, with a reason and never the
+/// credential (AUTH-STANDARD S5): bad plugin settings at validate, open and refresh, and a binding
+/// `open_outbound` refuses. RED before the fix: the crate logged nothing.
+#[test]
+fn every_refusal_is_logged_once_at_info_without_the_credential() {
+    let cap = busbar_test_kit::warn_capture::WarnCapture::capturing_debug();
+    tracing::subscriber::with_default(cap.clone(), || {
+        let _ = Header::validate(b"[1]");
+        let _ = Header::open(br#"{"heder":1}"#, &[], 1);
+        let h = Header::new(1);
+        let _ = h.refresh(b"nope", &[], 2);
+        let mut diags = Diags::default();
+        let _ = h.open_outbound(
+            style::BEARER,
+            Some(b"sk-operator-secret"),
+            Some(br#"{"heder":"x"}"#),
+            None,
+            &mut diags,
+        );
+        let _ = h.open_outbound(
+            style::BEARER,
+            Some(b"\xffsk-operator-secret"),
+            None,
+            None,
+            &mut diags,
+        );
+    });
+    let lines = cap.messages();
+    assert_eq!(lines.len(), 5, "{lines:?}");
+    for line in &lines {
+        assert!(line.contains("module=\"header\"") || line.contains("module=header"), "{line}");
+        assert!(line.contains("reason="), "{line}");
+        assert!(!line.contains("sk-operator-secret"), "{line}");
+    }
+    assert_eq!(cap.count("settings refused"), 3, "{lines:?}");
+    assert_eq!(cap.count("binding refused"), 2, "{lines:?}");
+}

@@ -203,8 +203,10 @@ name = "busbar-auth-header"
 version = "1.6.0"
 dependencies = [
  "busbar-contract",
+ "busbar-test-kit",
  "serde",
  "serde_json",
+ "tracing",
  "zeroize",
 ]
 
