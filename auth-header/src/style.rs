@@ -237,11 +237,25 @@ fn blank(setting: &str) -> Refusal {
     Refusal::Settings(format!("outbound auth setting `{setting}` must not be blank"))
 }
 
+/// Whether `name` is a query parameter name this plugin will present: non-empty, an RFC 9110 token
+/// (so no control character, space or `=`) that is also free of `&` and `#`, which would end the
+/// parameter or the query.
+fn is_param_name(name: &str) -> bool {
+    !name.is_empty()
+        && busbar_contract::header::is_header_name_token(name.as_bytes())
+        && !name.contains(['&', '#'])
+}
+
 /// A style's scheme: its default presentation, overridden by the settings.
 fn static_scheme(style: &str, m: &Map<String, Value>) -> Result<StaticScheme, Refusal> {
     if style == QUERY_KEY {
         // One parameter, the credential verbatim; the header settings do not apply to it.
         let param = text(m, "param")?;
+        if param.as_deref().is_some_and(|p| !is_param_name(p)) {
+            return Err(Refusal::Settings(
+                "outbound auth setting `param` is not a query parameter name".to_string(),
+            ));
+        }
         return Ok(StaticScheme::uniform(Presentation::raw(
             param.as_deref().unwrap_or(QUERY_KEY_DEFAULT_PARAM),
         )));
@@ -353,6 +367,11 @@ pub fn open_binding(
     let protocol = text(&m, "protocol")
         .map_err(|r| vec![r])?
         .unwrap_or_default();
+    if protocol.chars().any(char::is_control) {
+        return Err(vec![Refusal::Settings(
+            "outbound auth setting `protocol` has a control character".to_string(),
+        )]);
+    }
     // NO CREDENTIAL ⇒ NO AUTH HEADER: an empty key is a keyless upstream
     // (`api_key: none`), and an empty `Authorization: Bearer ` is strictly worse than nothing.
     // (blank after trimming SP/HTAB counts as empty: a field value never carries them).
