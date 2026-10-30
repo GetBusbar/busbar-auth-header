@@ -18,10 +18,10 @@
 //!
 //! ## The RED arms stay in the file
 //!
-//! * [`red_a_sensitive_field_flag_is_not_the_1_5_5_bytes`]: the same plugin with its `fields` slot
-//!   rewritten to mark every field `FIELD_SENSITIVE` — the shape TODO item 583 asks for — loads and
-//!   passes the kind's checks, yet its transcript diverges from the pinned one. The pinned
-//!   transcript is what holds the ARCHITECT's Q4 ruling (the 1.5.5 bytes win: no flag).
+//! * [`red_an_unflagged_credential_header_is_not_the_pinned_bytes`]: the same plugin with its
+//!   `fields` slot rewritten to clear `FIELD_SENSITIVE` loads and passes the kind's checks, yet its
+//!   transcript diverges from the pinned one, which holds the lead-signed 1.6.0 rule (every
+//!   credential header flagged sensitive; ARCHITECT ruling Q4's "1.5.5 bytes, no flag" superseded).
 //! * [`red_a_writer_that_ignores_the_host_capacity_faults`]: a `fields` that writes past the
 //!   host's field capacity is FAULT at the loader, never a truncated header.
 
@@ -395,7 +395,7 @@ fn script(p: &Plugin<Auth>) -> Vec<String> {
     t
 }
 
-/// The transcript every build must answer: the 1.5.5 header bytes, no sensitive flag, the
+/// The transcript every build must answer: the 1.5.5 header bytes flagged sensitive, the
 /// `credential:` / `settings:` refusal lines, the short-buffer re-call, the caller-mode
 /// presentation (ARCHITECT ruling 2026-09-29), the expired handle.
 const EXPECTED: &[&str] = &[
@@ -410,14 +410,14 @@ const EXPECTED: &[&str] = &[
     "open_outbound sigv4 Failed settings: outbound auth style `sigv4` is not served by this plugin",
     "open_outbound kerberos Failed settings: outbound auth style `kerberos` is not served by this \
      plugin",
-    "fields Ready  authorization: Bearer sk-test-123 [flags=0]",
+    "fields Ready  authorization: Bearer sk-test-123 [flags=1]",
     "fields Failed  short(needed_fields=1 needed_bytes=31) -> recall Ready authorization: Bearer \
-     sk-test-123 [flags=0]",
-    "fields Ready  api-key: azure-key [flags=0]",
-    "fields Ready  x-goog-api-key: goog-key [flags=0]",
+     sk-test-123 [flags=1]",
+    "fields Ready  api-key: azure-key [flags=1]",
+    "fields Ready  x-goog-api-key: goog-key [flags=1]",
     "fields Ready  ",
-    "fields Ready  x-goog-api-key: caller-tok [flags=0]",
-    "fields Ready  authorization: Bearer caller-tok [flags=0]",
+    "fields Ready  x-goog-api-key: caller-tok [flags=1]",
+    "fields Ready  authorization: Bearer caller-tok [flags=1]",
     "fields Ready  ",
     "fields Refused ",
     "open_outbound query-key Ready ",
@@ -436,7 +436,7 @@ const EXPECTED: &[&str] = &[
     "open_outbound bearer Ready ",
     "retire 1 Ready",
     "after retire fields Refused ",
-    "gen 2 fields Ready  authorization: Bearer sk-test-123 [flags=0]",
+    "gen 2 fields Ready  authorization: Bearer sk-test-123 [flags=1]",
     "close Ready",
 ];
 
@@ -517,38 +517,39 @@ fn real_fields() -> Op {
     }
 }
 
-/// The real `fields`, then every written field marked `FIELD_SENSITIVE`.
-extern "C" fn sensitive_fields(inst: *mut c_void, i: *const c_void, o: *mut c_void) -> RawOutcome {
+/// The real `fields`, then every written field's `FIELD_SENSITIVE` cleared: the unflagged
+/// credential headers 1.5.5 sent indexable.
+extern "C" fn unflagged_fields(inst: *mut c_void, i: *const c_void, o: *mut c_void) -> RawOutcome {
     let r = real_fields()(inst, i, o);
     // SAFETY: the host's live `FieldsIn`/`FieldsOut` for this call.
     unsafe {
         let (i, o) = (&*i.cast::<FieldsIn>(), &*o.cast::<FieldsOut>());
         if r.outcome() == Outcome::Ready {
             for k in 0..o.fields_len as usize {
-                (*i.fields.add(k)).flags = FIELD_SENSITIVE;
+                (*i.fields.add(k)).flags &= !FIELD_SENSITIVE;
             }
         }
     }
     r
 }
 
-extern "C" fn sensitive_door() -> &'static Door {
-    door_with_fields(sensitive_fields)
+extern "C" fn unflagged_door() -> &'static Door {
+    door_with_fields(unflagged_fields)
 }
 
+/// A credential header without `FIELD_SENSITIVE` (an h2 encoder may then index it into the shared
+/// HPACK table) loads and passes the kind's checks, yet diverges from the pinned transcript, which
+/// holds the lead-signed 1.6.0 rule: every credential header is flagged sensitive.
 #[test]
-fn red_a_sensitive_field_flag_is_not_the_1_5_5_bytes() {
+fn red_an_unflagged_credential_header_is_not_the_pinned_bytes() {
     let d = Dispatcher::new(DispatchConfig::default());
     let folds = Arc::new(Folds::default());
-    let red = load_linked::<Auth>(&row(sensitive_door), bind(&folds, &d)).expect("the door loads");
+    let red = load_linked::<Auth>(&row(unflagged_door), bind(&folds, &d)).expect("the door loads");
     let t = script(&red);
-    assert_ne!(
-        t, EXPECTED,
-        "a sensitive flag must not pass as the 1.5.5 bytes"
-    );
+    assert_ne!(t, EXPECTED, "an unflagged credential header must not pass");
     assert!(
-        t.iter().any(|l| l.contains("[flags=1]")),
-        "the kind's check admits the flag; only the pinned transcript refuses it"
+        t.iter().any(|l| l.contains("[flags=0]")),
+        "the kind's check admits no flag; only the pinned transcript refuses it"
     );
 }
 
@@ -581,11 +582,11 @@ fn red_a_writer_that_ignores_the_host_capacity_faults() {
     assert!(fields(&red, h, MODE_OWN, z(), (256, 4)).starts_with("fields Fault"));
 }
 
-/// THE h2 BEARER BYTES (BUSBAR-1.6.0.md THE DESIGN, §6's proof): DOOR-TRANSPORT's `h2_parity` harness proves the
-/// framer door puts `authorization: Bearer sk-ant-test-0123456789` on the wire byte-identical to
-/// 1.5.5's reqwest, HPACK block included. That header is exactly what this plugin writes for that
-/// key, through the loader, both builds: the same name, the same value, and no sensitive flag (a
-/// flagged field would be sent never-indexed, other bytes — ARCHITECT ruling Q4).
+/// THE h2 BEARER FIELD (BUSBAR-1.6.0.md THE DESIGN, §6's proof): DOOR-TRANSPORT's `h2_parity`
+/// harness takes `authorization: Bearer sk-ant-test-0123456789` as its input. That header is
+/// exactly what this plugin writes for that key, through the loader, both builds: the same name,
+/// the same value, flagged `FIELD_SENSITIVE`, so an h2 encoder sends it never-indexed (the
+/// lead-signed 1.6.0 change from 1.5.5's indexable bytes, ARCHITECT ruling Q4 superseded).
 #[test]
 fn the_bearer_field_is_the_h2_parity_harness_input() {
     let d = Dispatcher::new(DispatchConfig::default());
@@ -600,7 +601,7 @@ fn the_bearer_field_is_the_h2_parity_harness_input() {
         let (_, h) = open_outbound(p, "bearer", Some("sk-ant-test-0123456789"), "{}");
         assert_eq!(
             fields(p, h, MODE_OWN, z(), (256, 4)),
-            "fields Ready  authorization: Bearer sk-ant-test-0123456789 [flags=0]"
+            "fields Ready  authorization: Bearer sk-ant-test-0123456789 [flags=1]"
         );
     }
 }
