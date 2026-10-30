@@ -278,9 +278,11 @@ impl OutboundPlugin for Header {
         })
     }
 
-    /// Always ready for a handle it holds — a header binding never mints.
+    /// Ready for a handle it holds unless its own credential cannot be presented (a header binding
+    /// never mints; one whose credential no header value may carry presents nothing).
     fn outbound_ready(&self, handle: u64) -> bool {
-        self.with_binding(handle, |_| ()).is_some()
+        self.with_binding(handle, |b| b.own_note().is_none())
+            .unwrap_or(false)
     }
 
     /// The new generation, later handles belong to.

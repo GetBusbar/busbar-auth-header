@@ -19,8 +19,8 @@
 //!   ([`busbar_contract::abi::auth::MODE_PASSTHROUGH`]). A credential SOURCE is not a mechanism, so
 //!   there is no separate `caller-credential` style; each mechanism plugin serves both modes of its
 //!   own styles.
-//! * `outbound_ready` is the handle's `ready` fact for the health prober: always ready — a header
-//!   binding never mints.
+//! * `outbound_ready` is the handle's `ready` fact for the health prober: ready unless its own
+//!   credential cannot be presented — a header binding never mints.
 //! * `tick` does nothing: nothing here refreshes ahead of a deadline.
 //!
 //! Each binding builds its header once, at `open_outbound` ([`style::Binding`]). The kernel
