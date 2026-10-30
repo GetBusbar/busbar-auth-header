@@ -40,7 +40,7 @@ fn no_declared_code_is_one_the_core_catalogue_holds() {
 }
 
 /// EVERY CODE THE PLUGIN RAISES IS DECLARED BY THE PLUGIN OR HELD BY THE CORE CATALOGUE. The
-/// Statement's diagnostic ids (`abi_str("BUSBAR-NNNN")` in `src/lib.rs`) are resolved by the host
+/// Statement's diagnostic ids (`DIAG_CODES`, `"BUSBAR-NNNN"`, in `src/lib.rs`) are resolved by the host
 /// from the full catalogue (`by_code`: the core's entries plus the plugins' declared ones), so a
 /// code in neither place would log without its slug, title and action.
 #[test]
@@ -67,13 +67,13 @@ fn every_raised_code_is_declared_here_or_held_by_the_core_catalogue() {
         .collect();
     let lib = include_str!("../lib.rs");
     let raised: Vec<u64> = lib
-        .split("abi_str(\"BUSBAR-")
+        .split("\"BUSBAR-")
         .skip(1)
         .map(|rest| rest[..4].parse().unwrap())
         .collect();
     assert!(
         !raised.is_empty(),
-        "no abi_str(\"BUSBAR-NNNN\") id read from src/lib.rs"
+        "no \"BUSBAR-NNNN\" code read from src/lib.rs"
     );
     for code in raised {
         assert!(
