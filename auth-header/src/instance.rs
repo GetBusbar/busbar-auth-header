@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{PoisonError, RwLock};
 use std::task::Poll;
 
-use busbar_contract::abi::auth::FIELD_QUERY;
+use busbar_contract::abi::auth::{FIELD_QUERY, FIELD_SENSITIVE};
 use busbar_contract::abi::mechanism::call::SEVERITY_WARN;
 use busbar_contract::abi::sdk::auth_outbound::{
     Diags, FieldsAnswer, FieldsView, FieldsWriter, Mode, OpenRefusal, OutboundPlugin,
@@ -35,10 +35,11 @@ pub(crate) mod diag {
     pub const CREDENTIAL_INVALID_BYTES: u32 = 2;
 }
 
-/// The flags every header field this plugin writes carries: NONE. Credential headers go
-/// out indexable, and an h2 encoder that honoured `FIELD_SENSITIVE` would send them never-indexed,
-/// which is different bytes on the wire.
-const FIELD_FLAGS: u32 = 0;
+/// The flags every header field this plugin writes carries: [`FIELD_SENSITIVE`], so an h2 encoder
+/// sends the credential never-indexed and it never enters a shared HPACK table (a lead-signed 1.6.0
+/// change: 1.5.5 sent credential headers indexable). A query parameter carries [`FIELD_QUERY`]
+/// alone: the flag governs header indexing only.
+const FIELD_FLAGS: u32 = FIELD_SENSITIVE;
 
 /// The plugin's own settings, judged alike at `validate`, `open` and `refresh`: none are read. The
 /// instance is opened over a binding's settings, so present settings must be a JSON object whose
