@@ -34,20 +34,49 @@ fn a_handle_is_ready_until_its_generation_retires() {
     assert!(!h.outbound_ready(999), "a handle never opened");
 }
 
+/// BAD PLUGIN SETTINGS ANSWER FAILED, ALIKE AT VALIDATE, OPEN AND REFRESH (AUTH-STANDARD S2), in
+/// the contract's instance-relative lines: settings that are not an object, and every key no style
+/// reads, by name. The keys a style reads are accepted (the instance is opened over a binding's
+/// settings), and a refused refresh leaves the instance serving its old generation. RED before the
+/// fix: REFUSED in the plugin's own words, and any key accepted.
 #[test]
-fn settings_that_are_not_an_object_are_refused_in_the_plugins_words() {
-    for bad in [&b"[1]"[..], b"nope"] {
-        let r = Header::validate(bad).expect_err("refused");
-        assert_eq!(
-            r.outcome(),
-            busbar_contract::abi::mechanism::call::Outcome::Refused
-        );
-        assert_eq!(r.text(), Some(SETTINGS_NOT_OBJECT));
+fn bad_settings_fail_alike_at_validate_open_and_refresh() {
+    use busbar_contract::abi::mechanism::call::Outcome;
+    use busbar_contract::abi::mechanism::lifecycle::check_validate_refusal;
+    let cases: [(&[u8], &str); 4] = [
+        (b"[1]", "settings: must be a JSON object"),
+        (b"nope", "settings: must be a JSON object"),
+        (br#"{"heder":"x"}"#, "settings.heder: unknown key"),
+        (
+            br#"{"a":1,"param":"key","b":2}"#,
+            "settings.a: unknown key\nsettings.b: unknown key",
+        ),
+    ];
+    for (bad, text) in cases {
+        let h = Header::new(1);
+        let (handle, _) = open(&h, style::BEARER, Some("sk-1"), "{}");
+        for r in [
+            Header::validate(bad).expect_err("validate refuses"),
+            Header::open(bad, &[], 1).expect_err("open refuses"),
+            h.refresh(bad, &[], 2).expect_err("refresh refuses"),
+        ] {
+            assert_eq!(r.outcome(), Outcome::Failed);
+            assert_eq!(r.text(), Some(text));
+            check_validate_refusal(text.as_bytes()).expect("the contract's line form");
+        }
+        h.retire(1);
+        assert!(!h.outbound_ready(handle), "the refused refresh moved no generation");
     }
-    assert!(Header::validate(b"").is_ok(), "absent settings");
-    assert!(Header::validate(b"{}").is_ok());
-    assert!(Header::open(b"[1]", &[], 1).is_err());
-    assert!(Header::new(1).refresh(b"[1]", &[], 2).is_err());
+    for good in [
+        &b""[..],
+        b"{}",
+        br#"{"param":"key","header":"x-api-key","families":[],"own":{},"passthrough":{},"protocol":"p"}"#,
+        br#"{"token_url":"https://t.example/","token_uri":"u","scope":"s","subject":"x"}"#,
+    ] {
+        assert!(Header::validate(good).is_ok());
+        assert!(Header::open(good, &[], 1).is_ok());
+        assert!(Header::new(1).refresh(good, &[], 2).is_ok());
+    }
 }
 
 #[test]
