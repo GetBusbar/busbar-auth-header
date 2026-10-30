@@ -10,8 +10,8 @@
 //!
 //! * LINKED — this crate's `door` (the `DoorFn` a compiled-in row holds), through
 //!   [`load_linked`];
-//! * DROPPED — this crate's own `cdylib` (built with `--features dropped-in`, its one exported
-//!   `busbar_plugin_door`), through [`load_dropped`].
+//! * DROPPED — this crate's own `cdylib` (its one exported `busbar_plugin_door`), through
+//!   [`load_dropped`].
 //!
 //! ONE script drives every auth op both ways through the loader's auth kind, each answer judged by
 //! the kind's own `check_*`, and the two are compared on BOTH folds.
@@ -25,10 +25,9 @@
 //! * [`red_a_writer_that_ignores_the_host_capacity_faults`]: a `fields` that writes past the
 //!   host's field capacity is FAULT at the loader, never a truncated header.
 
-// THE PUBLISHED CONFORMANCE SUITE (busbar-plugin-loader's `conformance` feature, TODO ABI-b4): the
-// auth kind's OUTBOUND script over this crate's linked door and its dropped-in cdylib (built with
-// `dropped-in`), driven by `conformance.json`; the hand-written both-ways proof below stays beside
-// it. `plugin-ci.yml` runs the suite under `--release` once the crate lives in its own repo.
+// THE PUBLISHED CONFORMANCE SUITE (busbar-test-kit): the auth kind's OUTBOUND script over this
+// crate's linked door and its cdylib, driven by `conformance.json`; the hand-written both-ways proof
+// below stays beside it.
 busbar_test_kit::conformance_suite! {
     door: busbar_auth_header::door,
     cdylib: "busbar_auth_header_plugin",

@@ -8,9 +8,6 @@ license.workspace = true
 publish.workspace = true
 description = "The header-presentation auth styles (bearer, api-key, x-goog-api-key), each served in both the operator's own credential and the caller's verified credential, as one auth-kind plugin on the auth kind's memory ABI."
 
-# MOVED from busbar (crates/busbar-auth-header at busbar bb0c7f71d4, history imported;
-# BUSBAR-1.6.0.md §9: every plugin lives in its own repo). The source is busbar's verbatim.
-
 [lib]
 # rlib only: the LINKED door (`busbar_auth_header::door`, the `DoorFn` a compiled-in row holds) and the
 # tests. The DROPPED door is the sibling `busbar-auth-header-plugin` cdylib, the same door behind the
