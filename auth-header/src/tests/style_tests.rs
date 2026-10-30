@@ -413,8 +413,14 @@ fn a_credential_is_presented_without_surrounding_whitespace() {
     for style in [BEARER, API_KEY, QUERY_KEY] {
         let (b, notes) = open(style, Some(" \t "), "{}");
         let b = b.expect("opens");
-        assert!(b.own().is_empty(), "{style}: a blank credential presents nothing");
-        assert!(notes.is_empty(), "{style}: and is no unpresentable credential");
+        assert!(
+            b.own().is_empty(),
+            "{style}: a blank credential presents nothing"
+        );
+        assert!(
+            notes.is_empty(),
+            "{style}: and is no unpresentable credential"
+        );
         assert!(b.passthrough(" \t").is_empty());
         assert!(!b.present_passthrough("  ", |_, _| panic!("emitted")));
         assert_eq!(b.passthrough_note("  "), None);
@@ -432,7 +438,7 @@ fn a_blank_top_level_string_setting_is_refused_by_name() {
         (BEARER, "protocol"),
         (API_KEY, "protocol"),
     ] {
-        for blank in ["", "  ", "\t"] {
+        for blank in ["", "  ", "\\t"] {
             let settings = format!(r#"{{"{key}":"{blank}"}}"#);
             assert_eq!(
                 lines(open(style, Some("k"), &settings).0),
@@ -451,7 +457,7 @@ fn a_blank_top_level_string_setting_is_refused_by_name() {
 /// is refused by name.
 #[test]
 fn a_blank_family_prefix_is_refused_by_name() {
-    for prefix in ["", " ", "\t"] {
+    for prefix in ["", " ", "\\t"] {
         let settings = format!(r#"{{"families":[{{"prefix":"sk-"}},{{"prefix":"{prefix}"}}]}}"#);
         assert_eq!(
             lines(open(BEARER, Some("k"), &settings).0),
@@ -465,7 +471,16 @@ fn a_blank_family_prefix_is_refused_by_name() {
 /// `protocol` carries no control character, so neither reaches a log line as injected text.
 #[test]
 fn param_and_protocol_are_validated() {
-    for bad in ["a b", "a=b", "a&b", "a#b", "a\\nb", "a\\u0000b", "a\\u007fb", "é"] {
+    for bad in [
+        "a b",
+        "a=b",
+        "a&b",
+        "a#b",
+        "a\\nb",
+        "a\\u0000b",
+        "a\\u007fb",
+        "é",
+    ] {
         let settings = format!(r#"{{"param":"{bad}"}}"#);
         assert_eq!(
             lines(open(QUERY_KEY, Some("k"), &settings).0),
@@ -475,7 +490,10 @@ fn param_and_protocol_are_validated() {
     }
     for good in ["key", "api_key", "api-key", "X.Key~1"] {
         let settings = format!(r#"{{"param":"{good}"}}"#);
-        assert!(open(QUERY_KEY, Some("k"), &settings).0.is_ok(), "{settings}");
+        assert!(
+            open(QUERY_KEY, Some("k"), &settings).0.is_ok(),
+            "{settings}"
+        );
     }
     for bad in ["a\\nb", "a\\r\\nb", "a\\u0000b", "a\\u001bb", "a\\u007fb"] {
         let settings = format!(r#"{{"protocol":"{bad}"}}"#);
@@ -485,5 +503,7 @@ fn param_and_protocol_are_validated() {
             "{settings}"
         );
     }
-    assert!(open(BEARER, Some("k"), r#"{"protocol":"open ai-1"}"#).0.is_ok());
+    assert!(open(BEARER, Some("k"), r#"{"protocol":"open ai-1"}"#)
+        .0
+        .is_ok());
 }

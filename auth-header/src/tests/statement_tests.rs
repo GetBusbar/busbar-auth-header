@@ -61,7 +61,7 @@ fn every_declared_style_carries_the_caller_credential_flag_and_the_head_point() 
             "flags {:#x}",
             d.flags
         );
-        assert_eq!(d.points, AuthPoints::HEAD);
+        assert_eq!(AuthPoints(d.points), AuthPoints::HEAD);
     }
 }
 

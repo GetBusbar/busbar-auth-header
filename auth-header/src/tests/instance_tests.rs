@@ -167,7 +167,10 @@ fn a_callers_credential_is_presented_by_reference_with_the_owned_bytes() {
     let h = Header::new(1);
     let (handle, _) = open(&h, style::BEARER, None, "{}");
     let long = "k".repeat(crate::present::STACK_VALUE * 2);
-    assert!(long.len() + "Bearer ".len() > crate::present::STACK_VALUE, "the heap branch");
+    assert!(
+        long.len() + "Bearer ".len() > crate::present::STACK_VALUE,
+        "the heap branch"
+    );
     let long_expected = format!("Bearer {}", "k".repeat(2048));
     for (caller, expected) in [
         ("caller-tok", "Bearer caller-tok"),
@@ -273,16 +276,29 @@ fn an_unpresentable_own_credential_logs_one_info_line_at_open() {
     let cap = busbar_test_kit::warn_capture::WarnCapture::capturing_debug();
     tracing::subscriber::with_default(cap.clone(), || {
         let h = Header::new(1);
-        let _ = open(&h, style::API_KEY, Some("sk-secret\nx"), r#"{"header":"x-key"}"#);
-        let _ = open(&h, style::BEARER, Some("sk-secret\nx"), r#"{"protocol":"twin"}"#);
+        let _ = open(
+            &h,
+            style::API_KEY,
+            Some("sk-secret\nx"),
+            r#"{"header":"x-key"}"#,
+        );
+        let _ = open(
+            &h,
+            style::BEARER,
+            Some("sk-secret\nx"),
+            r#"{"protocol":"twin"}"#,
+        );
         let _ = open(&h, style::API_KEY, Some("fine"), "{}");
         let _ = open(&h, style::API_KEY, None, "{}");
     });
     let lines = cap.messages();
     assert_eq!(lines.len(), 2, "{lines:?}");
     for line in &lines {
-        assert!(line.contains("module=\"header\"") || line.contains("module=header"), "{line}");
-        assert!(line.contains("reason=\"unpresentable_credential\""), "{line}");
+        assert!(
+            line.contains("module=\"header\"") || line.contains("module=header"),
+            "{line}"
+        );
+        assert!(line.contains("reason=unpresentable_credential"), "{line}");
         assert!(!line.contains("sk-secret"), "{line}");
     }
     assert!(lines[0].contains("x-key"), "{}", lines[0]);
@@ -314,7 +330,10 @@ fn a_handle_kept_while_the_generation_moves_takes_the_new_generation() {
     drop(guard);
     let handle = kept.join().unwrap();
     h.retire(1);
-    assert!(h.outbound_ready(handle), "kept after the move: generation 2's");
+    assert!(
+        h.outbound_ready(handle),
+        "kept after the move: generation 2's"
+    );
     h.retire(2);
     assert!(!h.outbound_ready(handle));
 }
@@ -328,7 +347,13 @@ fn keep_refresh_retire_are_ordered() {
     h.refresh(b"{}", &[], 2).unwrap();
     let (b, _) = open(&h, style::BEARER, Some("k"), "{}");
     h.retire(1);
-    let held: Vec<u64> = h.handles.read().unwrap().values().map(|(g, _)| *g).collect();
+    let held: Vec<u64> = h
+        .handles
+        .read()
+        .unwrap()
+        .values()
+        .map(|(g, _)| *g)
+        .collect();
     assert_eq!(held, [2]);
     assert!(!h.outbound_ready(a) && h.outbound_ready(b));
 }
