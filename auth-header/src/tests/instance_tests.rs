@@ -231,3 +231,18 @@ fn every_refusal_is_logged_once_at_info_without_the_credential() {
     assert_eq!(cap.count("settings refused"), 3, "{lines:?}");
     assert_eq!(cap.count("binding refused"), 2, "{lines:?}");
 }
+
+/// A BINDING THAT CANNOT PRESENT IS NOT READY (AUTH-STANDARD S3): an own credential no header value
+/// may carry opens (each request is noted) but the health prober sees it unready. A keyless binding
+/// (no credential: a keyless upstream, or a passthrough lane) and a presentable one stay ready.
+/// RED before the fix: every held handle answered ready.
+#[test]
+fn a_binding_whose_own_credential_cannot_be_presented_is_not_ready() {
+    let h = Header::new(1);
+    let (bad, _) = open(&h, style::BEARER, Some("sk\r\ninjected"), "{}");
+    let (keyless, _) = open(&h, style::BEARER, None, "{}");
+    let (fine, _) = open(&h, style::API_KEY, Some("k"), "{}");
+    assert!(!h.outbound_ready(bad));
+    assert!(h.outbound_ready(keyless));
+    assert!(h.outbound_ready(fine));
+}
