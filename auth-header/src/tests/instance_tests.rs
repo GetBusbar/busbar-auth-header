@@ -270,3 +270,47 @@ fn an_unpresentable_own_credential_logs_one_info_line_at_open() {
     assert!(lines[0].contains("x-key"), "{}", lines[0]);
     assert!(lines[1].contains("twin"), "{}", lines[1]);
 }
+
+/// F6: THE LOCK RULE. `keep` reads the generation while holding the handles write lock, and
+/// `refresh` stores the new generation under that same lock, so keep / refresh / retire are
+/// ordered: a handle that was waiting for the lock when a refresh landed is stored under the NEW
+/// generation, never under one a retire may already have swept. Driven deterministically: the test
+/// holds the write lock (as `refresh` does while it stores), a `keep` queues behind it, the
+/// generation moves, and the lock is released.
+#[test]
+fn a_handle_kept_while_the_generation_moves_takes_the_new_generation() {
+    let h = std::sync::Arc::new(Header::new(1));
+    let guard = h.handles.write().unwrap();
+    let (started, wait) = std::sync::mpsc::channel();
+    let kept = {
+        let h = h.clone();
+        std::thread::spawn(move || {
+            let binding = style::open_binding(style::BEARER, Some(b"sk-1"), None).unwrap();
+            started.send(()).unwrap();
+            h.keep(binding)
+        })
+    };
+    wait.recv().unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    h.generation.store(2, Ordering::Release);
+    drop(guard);
+    let handle = kept.join().unwrap();
+    h.retire(1);
+    assert!(h.outbound_ready(handle), "kept after the move: generation 2's");
+    h.retire(2);
+    assert!(!h.outbound_ready(handle));
+}
+
+/// F6, the API sequence: open, refresh, retire(old), open again; the new handles carry the new
+/// generation and nothing is left under the retired one.
+#[test]
+fn keep_refresh_retire_are_ordered() {
+    let h = Header::new(1);
+    let (a, _) = open(&h, style::BEARER, Some("k"), "{}");
+    h.refresh(b"{}", &[], 2).unwrap();
+    let (b, _) = open(&h, style::BEARER, Some("k"), "{}");
+    h.retire(1);
+    let held: Vec<u64> = h.handles.read().unwrap().values().map(|(g, _)| *g).collect();
+    assert_eq!(held, [2]);
+    assert!(!h.outbound_ready(a) && h.outbound_ready(b));
+}
