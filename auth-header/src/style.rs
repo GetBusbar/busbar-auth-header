@@ -262,6 +262,9 @@ fn static_scheme(style: &str, m: &Map<String, Value>) -> Result<StaticScheme, Re
     let mut scheme = StaticScheme::uniform(default);
     if let Some(mut families) = field::<Vec<Family>>(m, "families")? {
         for (i, family) in families.iter_mut().enumerate() {
+            if family.prefix.trim().is_empty() {
+                return Err(blank(&format!("families[{i}].prefix")));
+            }
             header_name(&format!("families[{i}].header"), &mut family.presented)?;
         }
         scheme.families = families;
