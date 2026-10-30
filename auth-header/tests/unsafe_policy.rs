@@ -31,12 +31,44 @@ fn sources() -> Vec<(PathBuf, String)> {
     out
 }
 
-/// The code of a source, its `//` comments dropped (prose may name what the code must not do).
+/// The code of a source, its `//` comments dropped (prose may name what the code must not do). A
+/// `//` inside a string literal is code, not a comment, and is kept.
 fn code(text: &str) -> String {
     text.lines()
-        .map(|l| l.split("//").next().unwrap_or(""))
+        .map(strip_line_comment)
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// `line` up to a `//` that is outside any `"..."` literal (a `\"` inside one does not end it).
+fn strip_line_comment(line: &str) -> &str {
+    let bytes = line.as_bytes();
+    let (mut in_string, mut i) = (false, 0);
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\\' if in_string => i += 1,
+            b'"' => in_string = !in_string,
+            b'/' if !in_string && bytes.get(i + 1) == Some(&b'/') => return &line[..i],
+            _ => {}
+        }
+        i += 1;
+    }
+    line
+}
+
+/// A `//` inside a string literal does not hide the code after it from the policy.
+#[test]
+fn the_comment_stripper_keeps_slashes_inside_string_literals() {
+    assert_eq!(
+        strip_line_comment(r#"let u = "http://x"; // note"#),
+        r#"let u = "http://x"; "#
+    );
+    assert_eq!(
+        strip_line_comment(r#"let q = "a\"//b"; unsafe {}"#),
+        r#"let q = "a\"//b"; unsafe {}"#
+    );
+    assert_eq!(strip_line_comment("code // unsafe {"), "code ");
+    assert_eq!(strip_line_comment("// only a comment"), "");
 }
 
 /// The door is the contract SDK's safe auth kit, and the crate root forbids `unsafe` with no module
