@@ -20,6 +20,8 @@
 //! without `header` presents as a bearer); `own` / `passthrough` are `{header?, trim_start?}`.
 //! `protocol` is the lane's protocol name, which a bearer's and a credential-family table's
 //! unpresentable-credential line names (the `protocol=` field; empty when absent).
+//! A key the style does not read is refused by name (`settings: unknown key `<key>``), except the
+//! provider keys the kernel writes into every style's settings ([`PROVIDER_KEYS`]), read by none.
 //!
 //! The notes: a credential with bytes no header value may carry presents nothing, and raises a
 //! [`Note`] at WARN on each request that would have carried it, the operator's own and a caller's
@@ -29,6 +31,7 @@
 //! `credential: <text>` or `settings: <text>`. The kernel composes the sentence —
 //! `provider '<p>' <style> credential (from <src>) is invalid: <text>`, or `provider '<p>' <text>`.
 
+use busbar_contract::abi::sdk::auth_kit::json_error;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
@@ -46,6 +49,42 @@ pub const X_GOOG_API_KEY: &str = "x-goog-api-key";
 pub const QUERY_KEY: &str = "query-key";
 /// The query parameter [`QUERY_KEY`] presents under when the settings name none.
 pub const QUERY_KEY_DEFAULT_PARAM: &str = "key";
+
+/// The keys the kernel writes into every style's settings beside the dialect's (busbar
+/// `root/door_steps.rs`, `StyleParams::to_json`): a minting style's endpoint, scope and subject. A
+/// header style reads none of them, as 1.5.5 ignored them on a header provider.
+pub(crate) const PROVIDER_KEYS: &[&str] = &["token_url", "token_uri", "scope", "subject"];
+/// The keys `api-key` and `x-goog-api-key` read.
+const RAW_KEYS: &[&str] = &["header", "families", "own", "passthrough", "protocol"];
+/// The keys `bearer` reads (its header is always `authorization`).
+const BEARER_KEYS: &[&str] = &["families", "own", "passthrough", "protocol"];
+/// The keys `query-key` reads.
+const QUERY_KEYS: &[&str] = &["param"];
+
+/// The keys `style` reads, `None` for a style this plugin does not serve.
+fn style_keys(style: &str) -> Option<&'static [&'static str]> {
+    match style {
+        BEARER => Some(BEARER_KEYS),
+        API_KEY | X_GOOG_API_KEY => Some(RAW_KEYS),
+        QUERY_KEY => Some(QUERY_KEYS),
+        _ => None,
+    }
+}
+
+/// Whether some style reads `key`, or the kernel writes it into every style's settings.
+pub(crate) fn known_key(key: &str) -> bool {
+    [RAW_KEYS, QUERY_KEYS, PROVIDER_KEYS]
+        .iter()
+        .any(|keys| keys.contains(&key))
+}
+
+/// One refusal per key `style` does not read, naming it, in the settings' key order.
+fn unknown_keys(m: &Map<String, Value>, keys: &[&str]) -> Vec<Refusal> {
+    m.keys()
+        .filter(|k| !keys.contains(&k.as_str()) && !PROVIDER_KEYS.contains(&k.as_str()))
+        .map(|k| Refusal::Settings(format!("unknown key `{k}`")))
+        .collect()
+}
 
 /// One finding that refuses a binding.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -166,9 +205,9 @@ fn object(settings: Option<&[u8]>) -> Result<Map<String, Value>, Refusal> {
         Ok(_) => Err(Refusal::Settings(
             "outbound auth settings must be a JSON object".to_string(),
         )),
-        Err(e) => Err(Refusal::Settings(format!(
-            "outbound auth settings are not JSON: {e}"
-        ))),
+        Err(e) => Err(Refusal::Settings(json_error(
+            "outbound auth settings are not JSON",
+        )(e))),
     }
 }
 
@@ -179,7 +218,8 @@ fn field<T: for<'de> Deserialize<'de>>(
     match m.get(key) {
         None | Some(Value::Null) => Ok(None),
         Some(v) => serde_json::from_value(v.clone()).map(Some).map_err(|e| {
-            Refusal::Settings(format!("outbound auth setting `{key}` is invalid: {e}"))
+            let why = json_error("is invalid")(e);
+            Refusal::Settings(format!("outbound auth setting `{key}` {why}"))
         }),
     }
 }
@@ -283,6 +323,12 @@ pub fn open_binding(
     settings: Option<&[u8]>,
 ) -> Result<Binding, Vec<Refusal>> {
     let m = object(settings).map_err(|r| vec![r])?;
+    if let Some(keys) = style_keys(style) {
+        let unknown = unknown_keys(&m, keys);
+        if !unknown.is_empty() {
+            return Err(unknown);
+        }
+    }
     let credential_text = match credential.map(std::str::from_utf8) {
         None => None,
         Some(Ok(s)) => Some(s),

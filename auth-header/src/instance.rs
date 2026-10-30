@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{PoisonError, RwLock};
 use std::task::Poll;
 
-use busbar_contract::abi::auth::FIELD_QUERY;
+use busbar_contract::abi::auth::{FIELD_QUERY, FIELD_SENSITIVE};
 use busbar_contract::abi::mechanism::call::SEVERITY_WARN;
 use busbar_contract::abi::sdk::auth_outbound::{
     Diags, FieldsAnswer, FieldsView, FieldsWriter, Mode, OpenRefusal, OutboundPlugin,
@@ -35,21 +35,40 @@ pub(crate) mod diag {
     pub const CREDENTIAL_INVALID_BYTES: u32 = 2;
 }
 
-/// The flags every header field this plugin writes carries: NONE. Credential headers go
-/// out indexable, and an h2 encoder that honoured `FIELD_SENSITIVE` would send them never-indexed,
-/// which is different bytes on the wire.
-const FIELD_FLAGS: u32 = 0;
+/// The flags every header field this plugin writes carries: [`FIELD_SENSITIVE`], so an h2 encoder
+/// sends the credential never-indexed and it never enters a shared HPACK table (a lead-signed 1.6.0
+/// change: 1.5.5 sent credential headers indexable). A query parameter carries [`FIELD_QUERY`]
+/// alone: the flag governs header indexing only.
+const FIELD_FLAGS: u32 = FIELD_SENSITIVE;
 
-/// The refusal of plugin settings that are not a JSON object.
-pub(crate) const SETTINGS_NOT_OBJECT: &str = "busbar-auth-header settings must be a JSON object";
-
-/// The plugin's own settings: none are read; present settings must be a JSON object (empty bytes
-/// are absent settings).
+/// The plugin's own settings, judged alike at `validate`, `open` and `refresh`: none are read. The
+/// instance is opened over a binding's settings, so present settings must be a JSON object whose
+/// every key some style reads ([`style::known_key`]); anything else is FAILED, one
+/// `settings.<key>: unknown key` line per key.
 fn settings(b: &[u8]) -> Result<(), Refusal> {
-    if life::settings_object(b).is_ok() {
+    let m = life::settings_object(b).inspect_err(|_| {
+        tracing::info!(
+            module = "header",
+            reason = "not_object",
+            "header settings refused"
+        );
+    })?;
+    let unknown: Vec<String> = m
+        .keys()
+        .filter(|k| !style::known_key(k))
+        .map(|k| format!("settings.{k}: unknown key"))
+        .collect();
+    if unknown.is_empty() {
         Ok(())
     } else {
-        Err(Refusal::refused(SETTINGS_NOT_OBJECT))
+        let lines = unknown.join("\n");
+        tracing::info!(
+            module = "header",
+            reason = "unknown_key",
+            refusal = %lines,
+            "header settings refused"
+        );
+        Err(Refusal::failed(lines))
     }
 }
 
@@ -159,7 +178,16 @@ impl OutboundPlugin for Header {
         match opened {
             Ok(binding) => Ok(self.keep(binding)),
             Err(refusals) => {
-                let mut lines = refusals.iter().map(style::Refusal::line);
+                let lines: Vec<String> = refusals.iter().map(style::Refusal::line).collect();
+                // The lines name a setting or the credential's encoding, never a value.
+                tracing::info!(
+                    module = "header",
+                    style,
+                    reason = "binding_refused",
+                    refusal = %lines.join("; "),
+                    "header binding refused"
+                );
+                let mut lines = lines.into_iter();
                 let first = lines.next().unwrap_or_default();
                 Err(lines.fold(OpenRefusal::new(first), OpenRefusal::and))
             }
@@ -238,13 +266,23 @@ impl OutboundPlugin for Header {
         };
         Poll::Ready(match answered {
             Some(()) => FieldsAnswer::Ready,
-            None => FieldsAnswer::Refused,
+            None => {
+                tracing::info!(
+                    module = "header",
+                    handle,
+                    reason = "unknown_handle",
+                    "header fields refused"
+                );
+                FieldsAnswer::Refused
+            }
         })
     }
 
-    /// Always ready for a handle it holds — a header binding never mints.
+    /// Ready for a handle it holds unless its own credential cannot be presented (a header binding
+    /// never mints; one whose credential no header value may carry presents nothing).
     fn outbound_ready(&self, handle: u64) -> bool {
-        self.with_binding(handle, |_| ()).is_some()
+        self.with_binding(handle, |b| b.own_note().is_none())
+            .unwrap_or(false)
     }
 
     /// The new generation, later handles belong to.

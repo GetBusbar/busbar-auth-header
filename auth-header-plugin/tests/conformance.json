@@ -21,7 +21,8 @@
         "expect_fields": [
           [
             "authorization",
-            "Bearer sk-test-123"
+            "Bearer sk-test-123",
+            1
           ]
         ]
       },
@@ -45,7 +46,8 @@
         "expect_fields": [
           [
             "api-key",
-            "azure-key"
+            "azure-key",
+            1
           ]
         ]
       },
@@ -69,7 +71,8 @@
         "expect_fields": [
           [
             "x-goog-api-key",
-            "goog-key"
+            "goog-key",
+            1
           ]
         ]
       },

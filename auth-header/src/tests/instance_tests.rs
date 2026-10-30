@@ -34,20 +34,52 @@ fn a_handle_is_ready_until_its_generation_retires() {
     assert!(!h.outbound_ready(999), "a handle never opened");
 }
 
+/// BAD PLUGIN SETTINGS ANSWER FAILED, ALIKE AT VALIDATE, OPEN AND REFRESH (AUTH-STANDARD S2), in
+/// the contract's instance-relative lines: settings that are not an object, and every key no style
+/// reads, by name. The keys a style reads are accepted (the instance is opened over a binding's
+/// settings), and a refused refresh leaves the instance serving its old generation. RED before the
+/// fix: REFUSED in the plugin's own words, and any key accepted.
 #[test]
-fn settings_that_are_not_an_object_are_refused_in_the_plugins_words() {
-    for bad in [&b"[1]"[..], b"nope"] {
-        let r = Header::validate(bad).expect_err("refused");
-        assert_eq!(
-            r.outcome(),
-            busbar_contract::abi::mechanism::call::Outcome::Refused
+fn bad_settings_fail_alike_at_validate_open_and_refresh() {
+    use busbar_contract::abi::mechanism::call::Outcome;
+    use busbar_contract::abi::mechanism::lifecycle::check_validate_refusal;
+    let cases: [(&[u8], &str); 4] = [
+        (b"[1]", "settings: must be a JSON object"),
+        (b"nope", "settings: must be a JSON object"),
+        (br#"{"heder":"x"}"#, "settings.heder: unknown key"),
+        (
+            br#"{"a":1,"param":"key","b":2}"#,
+            "settings.a: unknown key\nsettings.b: unknown key",
+        ),
+    ];
+    for (bad, text) in cases {
+        let h = Header::new(1);
+        let (handle, _) = open(&h, style::BEARER, Some("sk-1"), "{}");
+        for r in [
+            Header::validate(bad).expect_err("validate refuses"),
+            Header::open(bad, &[], 1).expect_err("open refuses"),
+            h.refresh(bad, &[], 2).expect_err("refresh refuses"),
+        ] {
+            assert_eq!(r.outcome(), Outcome::Failed);
+            assert_eq!(r.text(), Some(text));
+            check_validate_refusal(text.as_bytes()).expect("the contract's line form");
+        }
+        h.retire(1);
+        assert!(
+            !h.outbound_ready(handle),
+            "the refused refresh moved no generation"
         );
-        assert_eq!(r.text(), Some(SETTINGS_NOT_OBJECT));
     }
-    assert!(Header::validate(b"").is_ok(), "absent settings");
-    assert!(Header::validate(b"{}").is_ok());
-    assert!(Header::open(b"[1]", &[], 1).is_err());
-    assert!(Header::new(1).refresh(b"[1]", &[], 2).is_err());
+    for good in [
+        &b""[..],
+        b"{}",
+        br#"{"param":"key","header":"x-api-key","families":[],"own":{},"passthrough":{},"protocol":"p"}"#,
+        br#"{"token_url":"https://t.example/","token_uri":"u","scope":"s","subject":"x"}"#,
+    ] {
+        assert!(Header::validate(good).is_ok());
+        assert!(Header::open(good, &[], 1).is_ok());
+        assert!(Header::new(1).refresh(good, &[], 2).is_ok());
+    }
 }
 
 #[test]
@@ -157,4 +189,60 @@ fn a_bindings_debug_never_prints_its_credential() {
         .with_binding(handle, |b| format!("{b:?}"))
         .expect("the binding");
     assert!(!shown.contains("operator-secret"), "{shown}");
+}
+
+/// EVERY REFUSAL IS LOGGED ONCE AT INFO, `module = "header"`, with a reason and never the
+/// credential (AUTH-STANDARD S5): bad plugin settings at validate, open and refresh, and a binding
+/// `open_outbound` refuses. RED before the fix: the crate logged nothing.
+#[test]
+fn every_refusal_is_logged_once_at_info_without_the_credential() {
+    let cap = busbar_test_kit::warn_capture::WarnCapture::capturing_debug();
+    tracing::subscriber::with_default(cap.clone(), || {
+        let _ = Header::validate(b"[1]");
+        let _ = Header::open(br#"{"heder":1}"#, &[], 1);
+        let h = Header::new(1);
+        let _ = h.refresh(b"nope", &[], 2);
+        let mut diags = Diags::default();
+        let _ = h.open_outbound(
+            style::BEARER,
+            Some(b"sk-operator-secret"),
+            Some(br#"{"heder":"x"}"#),
+            None,
+            &mut diags,
+        );
+        let _ = h.open_outbound(
+            style::BEARER,
+            Some(b"\xffsk-operator-secret"),
+            None,
+            None,
+            &mut diags,
+        );
+    });
+    let lines = cap.messages();
+    assert_eq!(lines.len(), 5, "{lines:?}");
+    for line in &lines {
+        assert!(
+            line.contains("module=\"header\"") || line.contains("module=header"),
+            "{line}"
+        );
+        assert!(line.contains("reason="), "{line}");
+        assert!(!line.contains("sk-operator-secret"), "{line}");
+    }
+    assert_eq!(cap.count("settings refused"), 3, "{lines:?}");
+    assert_eq!(cap.count("binding refused"), 2, "{lines:?}");
+}
+
+/// A BINDING THAT CANNOT PRESENT IS NOT READY (AUTH-STANDARD S3): an own credential no header value
+/// may carry opens (each request is noted) but the health prober sees it unready. A keyless binding
+/// (no credential: a keyless upstream, or a passthrough lane) and a presentable one stay ready.
+/// RED before the fix: every held handle answered ready.
+#[test]
+fn a_binding_whose_own_credential_cannot_be_presented_is_not_ready() {
+    let h = Header::new(1);
+    let (bad, _) = open(&h, style::BEARER, Some("sk\r\ninjected"), "{}");
+    let (keyless, _) = open(&h, style::BEARER, None, "{}");
+    let (fine, _) = open(&h, style::API_KEY, Some("k"), "{}");
+    assert!(!h.outbound_ready(bad));
+    assert!(h.outbound_ready(keyless));
+    assert!(h.outbound_ready(fine));
 }

@@ -311,3 +311,73 @@ fn an_unpresentable_query_credential_is_noted_by_its_parameter() {
     assert!(own(r).is_empty());
     assert_eq!(notes, [Note::Query(QUERY_KEY_DEFAULT_PARAM.to_string())]);
 }
+
+/// A SETTINGS VALUE IS NEVER QUOTED BACK (AUTH-STANDARD S1: serde errors go through
+/// `auth_kit::json_error`): a credential pasted into the wrong key, or settings that are not JSON,
+/// are refused naming the key and the class of failure, never the value. RED before the fix: the
+/// line carried serde's text, which quotes the value.
+#[test]
+fn a_settings_value_is_never_quoted_in_a_refusal() {
+    for settings in [
+        r#"{"own":"sk-pasted-secret"}"#,
+        r#"{"protocol":["sk-pasted-secret"]}"#,
+        r#"{"families":[{"prefix":"sk-pasted-secret","header":7}]}"#,
+        r#"{"own": sk-pasted-secret}"#,
+    ] {
+        let refused = lines(open(API_KEY, Some("k"), settings).0);
+        assert_eq!(refused.len(), 1, "{refused:?}");
+        assert!(refused[0].starts_with("settings: "), "{refused:?}");
+        assert!(!refused[0].contains("sk-pasted-secret"), "{refused:?}");
+    }
+    let refused = lines(open(API_KEY, Some("k"), r#"{"own":"sk-pasted-secret"}"#).0);
+    assert!(refused[0].contains("`own`"), "names the key: {refused:?}");
+}
+
+/// AN UNKNOWN PER-STYLE KEY IS REFUSED BY NAME (AUTH-STANDARD S2): a typo'd optional key must not
+/// silently fall back to its default. Every dialect's parameter set (busbar-plane-llm
+/// `dialect.rs`) and the provider keys the kernel hands every style (`StyleParams`: `token_url`,
+/// `token_uri`, `scope`, `subject`, which 1.5.5 ignored on a header provider) still open. RED
+/// before the fix: every unknown key was ignored.
+#[test]
+fn an_unknown_settings_key_is_refused_by_name() {
+    assert_eq!(
+        lines(open(API_KEY, Some("k"), r#"{"heder":"x-api-key"}"#).0),
+        ["settings: unknown key `heder`"]
+    );
+    assert_eq!(
+        lines(open(BEARER, Some("k"), r#"{"header":"x-api-key","param":"key"}"#).0),
+        [
+            "settings: unknown key `header`",
+            "settings: unknown key `param`"
+        ]
+    );
+    assert_eq!(
+        lines(open(QUERY_KEY, Some("k"), r#"{"header":"x"}"#).0),
+        ["settings: unknown key `header`"]
+    );
+    let dialects = [
+        (
+            API_KEY,
+            r#"{"header":"x-api-key","families":[{"prefix":"sk-ant-api","header":"x-api-key","trim_start":true},{"prefix":"sk-ant-oat"}],"own":{"header":"x-api-key"},"passthrough":{},"protocol":"anthropic"}"#,
+        ),
+        (
+            BEARER,
+            r#"{"families":[],"own":{},"passthrough":{},"protocol":"openai"}"#,
+        ),
+        (
+            X_GOOG_API_KEY,
+            r#"{"families":[],"own":{"header":"x-goog-api-key"},"passthrough":{"header":"x-goog-api-key"},"protocol":"gemini"}"#,
+        ),
+        (QUERY_KEY, r#"{"param":"key"}"#),
+    ];
+    for (style, settings) in dialects {
+        assert!(
+            open(style, Some("k"), settings).0.is_ok(),
+            "{style} {settings}"
+        );
+    }
+    for style in [BEARER, API_KEY, X_GOOG_API_KEY, QUERY_KEY] {
+        let provider = r#"{"token_url":"https://t.example/","token_uri":"https://u.example/","scope":"s","subject":"x"}"#;
+        assert!(open(style, Some("k"), provider).0.is_ok(), "{style}");
+    }
+}

@@ -9,10 +9,6 @@
 //! own mode does. What either mode still allocates is the SDK's (its zeroised staging of the
 //! answer), the same in both.
 
-#![allow(unsafe_code)] // the counting allocator: `GlobalAlloc` is an unsafe trait
-
-use std::alloc::{GlobalAlloc, Layout, System};
-use std::cell::Cell;
 use std::mem::zeroed;
 use std::sync::{Arc, Mutex};
 
@@ -30,57 +26,10 @@ use busbar_plugin_loader::dispatch::{
     EnvelopeSink, Frame, LinkedRow, Metric, Plugin,
 };
 
-thread_local! {
-    static COUNTING: Cell<bool> = const { Cell::new(false) };
-    static COUNT: Cell<usize> = const { Cell::new(0) };
-}
-
-/// The system allocator, counting the allocations (and growths) made on a thread while it counts.
-struct Counting;
-
-fn count() {
-    let _ = COUNTING.try_with(|on| {
-        if on.get() {
-            let _ = COUNT.try_with(|n| n.set(n.get() + 1));
-        }
-    });
-}
-
-// SAFETY: every call is forwarded to `System` unchanged; counting touches only const-initialised
-// thread-locals, which never allocate.
-unsafe impl GlobalAlloc for Counting {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        count();
-        // SAFETY: forwarded as given.
-        unsafe { System.alloc(layout) }
-    }
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        // SAFETY: forwarded as given.
-        unsafe { System.dealloc(ptr, layout) }
-    }
-    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
-        count();
-        // SAFETY: forwarded as given.
-        unsafe { System.alloc_zeroed(layout) }
-    }
-    unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-        count();
-        // SAFETY: forwarded as given.
-        unsafe { System.realloc(ptr, layout, new_size) }
-    }
-}
-
+/// The test kit's counting allocator (busbar-test-kit `alloc_counter`), per thread.
 #[global_allocator]
-static ALLOC: Counting = Counting;
-
-/// The allocations `f` makes on this thread.
-fn allocations(f: impl FnOnce()) -> usize {
-    COUNT.with(|n| n.set(0));
-    COUNTING.with(|on| on.set(true));
-    f();
-    COUNTING.with(|on| on.set(false));
-    COUNT.with(Cell::get)
-}
+static ALLOC: busbar_test_kit::alloc_counter::Counting =
+    busbar_test_kit::alloc_counter::Counting::new();
 
 fn z<T>() -> T {
     // SAFETY: every `in`/`out` here is plain C data; all-zero is a valid value of each.
@@ -191,12 +140,12 @@ impl Call {
 }
 
 /// `n` `fields` calls of `mode`, each counted; the answers read back.
-fn counted(p: &Plugin<Auth>, handle: u64, mode: u32, caller: Blob, n: usize) -> (usize, String) {
+fn counted(p: &Plugin<Auth>, handle: u64, mode: u32, caller: Blob, n: usize) -> (u64, String) {
     let mut total = 0;
     let mut field = String::new();
     for _ in 0..n {
         let mut call = Call::new(handle, mode, caller);
-        total += allocations(|| {
+        total += busbar_test_kit::alloc_counter::allocations_of(|| {
             assert_eq!(
                 p.call(slot::FIELDS, &mut call.frame).outcome,
                 Outcome::Ready
