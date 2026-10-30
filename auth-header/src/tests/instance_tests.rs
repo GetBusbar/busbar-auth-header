@@ -246,3 +246,27 @@ fn a_binding_whose_own_credential_cannot_be_presented_is_not_ready() {
     assert!(h.outbound_ready(keyless));
     assert!(h.outbound_ready(fine));
 }
+
+/// F5: an own credential that cannot be presented opens, and the open logs ONE info line
+/// (`module = "header"`, a reason word, the header or protocol name), never the credential. A
+/// presentable or keyless credential logs nothing.
+#[test]
+fn an_unpresentable_own_credential_logs_one_info_line_at_open() {
+    let cap = busbar_test_kit::warn_capture::WarnCapture::capturing_debug();
+    tracing::subscriber::with_default(cap.clone(), || {
+        let h = Header::new(1);
+        let _ = open(&h, style::API_KEY, Some("sk-secret\nx"), r#"{"header":"x-key"}"#);
+        let _ = open(&h, style::BEARER, Some("sk-secret\nx"), r#"{"protocol":"twin"}"#);
+        let _ = open(&h, style::API_KEY, Some("fine"), "{}");
+        let _ = open(&h, style::API_KEY, None, "{}");
+    });
+    let lines = cap.messages();
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    for line in &lines {
+        assert!(line.contains("module=\"header\"") || line.contains("module=header"), "{line}");
+        assert!(line.contains("reason=\"unpresentable_credential\""), "{line}");
+        assert!(!line.contains("sk-secret"), "{line}");
+    }
+    assert!(lines[0].contains("x-key"), "{}", lines[0]);
+    assert!(lines[1].contains("twin"), "{}", lines[1]);
+}
