@@ -311,3 +311,24 @@ fn an_unpresentable_query_credential_is_noted_by_its_parameter() {
     assert!(own(r).is_empty());
     assert_eq!(notes, [Note::Query(QUERY_KEY_DEFAULT_PARAM.to_string())]);
 }
+
+/// A SETTINGS VALUE IS NEVER QUOTED BACK (AUTH-STANDARD S1: serde errors go through
+/// `auth_kit::json_error`): a credential pasted into the wrong key, or settings that are not JSON,
+/// are refused naming the key and the class of failure, never the value. RED before the fix: the
+/// line carried serde's text, which quotes the value.
+#[test]
+fn a_settings_value_is_never_quoted_in_a_refusal() {
+    for settings in [
+        r#"{"own":"sk-pasted-secret"}"#,
+        r#"{"protocol":["sk-pasted-secret"]}"#,
+        r#"{"families":[{"prefix":"sk-pasted-secret","header":7}]}"#,
+        r#"{"own": sk-pasted-secret}"#,
+    ] {
+        let refused = lines(open(API_KEY, Some("k"), settings).0);
+        assert_eq!(refused.len(), 1, "{refused:?}");
+        assert!(refused[0].starts_with("settings: "), "{refused:?}");
+        assert!(!refused[0].contains("sk-pasted-secret"), "{refused:?}");
+    }
+    let refused = lines(open(API_KEY, Some("k"), r#"{"own":"sk-pasted-secret"}"#).0);
+    assert!(refused[0].contains("`own`"), "names the key: {refused:?}");
+}
