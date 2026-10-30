@@ -64,9 +64,18 @@ fn bad_settings_fail_alike_at_validate_open_and_refresh() {
             assert_eq!(r.text(), Some(text));
             check_validate_refusal(text.as_bytes()).expect("the contract's line form");
         }
+        // A handle opened AFTER the refused refreshes carries the OLD generation: retiring the
+        // refused new one keeps it, retiring the old one removes it (a generation stored before
+        // the settings check would put it under 2).
+        let (after, _) = open(&h, style::BEARER, Some("sk-1"), "{}");
+        h.retire(2);
+        assert!(
+            h.outbound_ready(handle) && h.outbound_ready(after),
+            "retiring the refused generation removes nothing"
+        );
         h.retire(1);
         assert!(
-            !h.outbound_ready(handle),
+            !h.outbound_ready(handle) && !h.outbound_ready(after),
             "the refused refresh moved no generation"
         );
     }
@@ -151,13 +160,22 @@ fn note_line_reports_each_note_in_its_own_line() {
 }
 
 /// A caller's credential is presented by reference with the bytes the owned presentation builds,
-/// a bearer longer than the stack stage included; one no header value may carry emits nothing.
+/// a bearer longer than the stack stage included, each against independent literal bytes; one no
+/// header value may carry emits nothing.
 #[test]
 fn a_callers_credential_is_presented_by_reference_with_the_owned_bytes() {
     let h = Header::new(1);
     let (handle, _) = open(&h, style::BEARER, None, "{}");
     let long = "k".repeat(crate::present::STACK_VALUE * 2);
-    for caller in ["caller-tok", long.as_str()] {
+    assert!(
+        long.len() + "Bearer ".len() > crate::present::STACK_VALUE,
+        "the heap branch"
+    );
+    let long_expected = format!("Bearer {}", "k".repeat(2048));
+    for (caller, expected) in [
+        ("caller-tok", "Bearer caller-tok"),
+        (long.as_str(), long_expected.as_str()),
+    ] {
         let by_ref = h
             .with_binding(handle, |b| {
                 let mut got = None;
@@ -172,8 +190,11 @@ fn a_callers_credential_is_presented_by_reference_with_the_owned_bytes() {
         let owned = h
             .with_binding(handle, |b| b.passthrough(caller))
             .expect("the binding");
-        assert_eq!(by_ref.0, owned[0].0.as_bytes());
-        assert_eq!(by_ref.1, owned[0].1.as_bytes());
+        assert_eq!(by_ref.0, b"authorization");
+        assert_eq!(by_ref.1, expected.as_bytes());
+        assert_eq!(owned.len(), 1);
+        assert_eq!(owned[0].0, "authorization");
+        assert_eq!(owned[0].1.as_str(), expected);
     }
     let none = h.with_binding(handle, |b| b.present_passthrough("bad\nkey", |_, _| ()));
     assert_eq!(none, Some(false));
@@ -245,4 +266,94 @@ fn a_binding_whose_own_credential_cannot_be_presented_is_not_ready() {
     assert!(!h.outbound_ready(bad));
     assert!(h.outbound_ready(keyless));
     assert!(h.outbound_ready(fine));
+}
+
+/// F5: an own credential that cannot be presented opens, and the open logs ONE info line
+/// (`module = "header"`, a reason word, the header or protocol name), never the credential. A
+/// presentable or keyless credential logs nothing.
+#[test]
+fn an_unpresentable_own_credential_logs_one_info_line_at_open() {
+    let cap = busbar_test_kit::warn_capture::WarnCapture::capturing_debug();
+    tracing::subscriber::with_default(cap.clone(), || {
+        let h = Header::new(1);
+        let _ = open(
+            &h,
+            style::API_KEY,
+            Some("sk-secret\nx"),
+            r#"{"header":"x-key"}"#,
+        );
+        let _ = open(
+            &h,
+            style::BEARER,
+            Some("sk-secret\nx"),
+            r#"{"protocol":"twin"}"#,
+        );
+        let _ = open(&h, style::API_KEY, Some("fine"), "{}");
+        let _ = open(&h, style::API_KEY, None, "{}");
+    });
+    let lines = cap.messages();
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    for line in &lines {
+        assert!(
+            line.contains("module=\"header\"") || line.contains("module=header"),
+            "{line}"
+        );
+        assert!(line.contains("reason=unpresentable_credential"), "{line}");
+        assert!(!line.contains("sk-secret"), "{line}");
+    }
+    assert!(lines[0].contains("x-key"), "{}", lines[0]);
+    assert!(lines[1].contains("twin"), "{}", lines[1]);
+}
+
+/// F6: THE LOCK RULE. `keep` reads the generation while holding the handles write lock, and
+/// `refresh` stores the new generation under that same lock, so keep / refresh / retire are
+/// ordered: a handle that was waiting for the lock when a refresh landed is stored under the NEW
+/// generation, never under one a retire may already have swept. Driven deterministically: the test
+/// holds the write lock (as `refresh` does while it stores), a `keep` queues behind it, the
+/// generation moves, and the lock is released.
+#[test]
+fn a_handle_kept_while_the_generation_moves_takes_the_new_generation() {
+    let h = std::sync::Arc::new(Header::new(1));
+    let guard = h.handles.write().unwrap();
+    let (started, wait) = std::sync::mpsc::channel();
+    let kept = {
+        let h = h.clone();
+        std::thread::spawn(move || {
+            let binding = style::open_binding(style::BEARER, Some(b"sk-1"), None).unwrap();
+            started.send(()).unwrap();
+            h.keep(binding)
+        })
+    };
+    wait.recv().unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    h.generation.store(2, Ordering::Release);
+    drop(guard);
+    let handle = kept.join().unwrap();
+    h.retire(1);
+    assert!(
+        h.outbound_ready(handle),
+        "kept after the move: generation 2's"
+    );
+    h.retire(2);
+    assert!(!h.outbound_ready(handle));
+}
+
+/// F6, the API sequence: open, refresh, retire(old), open again; the new handles carry the new
+/// generation and nothing is left under the retired one.
+#[test]
+fn keep_refresh_retire_are_ordered() {
+    let h = Header::new(1);
+    let (a, _) = open(&h, style::BEARER, Some("k"), "{}");
+    h.refresh(b"{}", &[], 2).unwrap();
+    let (b, _) = open(&h, style::BEARER, Some("k"), "{}");
+    h.retire(1);
+    let held: Vec<u64> = h
+        .handles
+        .read()
+        .unwrap()
+        .values()
+        .map(|(g, _)| *g)
+        .collect();
+    assert_eq!(held, [2]);
+    assert!(!h.outbound_ready(a) && h.outbound_ready(b));
 }

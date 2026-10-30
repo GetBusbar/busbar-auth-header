@@ -36,7 +36,8 @@ const KEY_VECTORS: &[(&str, bool)] = &[
 #[test]
 fn bearer_builder_presents_every_admitted_key_and_omits_the_rest() {
     for &(key, legal) in KEY_VECTORS {
-        let expected = if legal {
+        // An empty key presents nothing (no credential, no auth header).
+        let expected = if legal && !key.is_empty() {
             vec![("authorization".to_string(), format!("Bearer {key}"))]
         } else {
             Vec::new()
@@ -56,7 +57,8 @@ fn bearer_builder_presents_every_admitted_key_and_omits_the_rest() {
 #[test]
 fn custom_header_builder_presents_the_raw_key_under_its_own_name() {
     for &(key, legal) in KEY_VECTORS {
-        let expected = if legal {
+        // An empty key presents nothing (no credential, no auth header).
+        let expected = if legal && !key.is_empty() {
             vec![("x-goog-api-key".to_string(), key.to_string())]
         } else {
             Vec::new()

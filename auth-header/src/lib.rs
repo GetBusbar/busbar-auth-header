@@ -91,14 +91,22 @@ const CARRIERS: [MarkWord; 3] = [
 /// Statement's carrier marks, [`CARRIERS`]); `verify` is not served.
 const TAIL: &AuthTail = &outbound_tail(FACT_DEFAULT_INBOUND_STYLE, STYLE_DECLS);
 
-/// The diagnostic ids, in `instance::diag` order. `BUSBAR-4013` covers both egress-credential lines
-/// that omit an api-key credential: the header line, and the query-parameter line, which says
-/// `param=` where the header line says `header=`; the named value tells the two apart.
+/// The diagnostic codes, in `instance::diag` order. `BUSBAR-4013` covers both egress-credential
+/// lines that omit a credential (the header line, and the query-parameter line, which says
+/// `param=` where the header line says `header=`; the named value tells the two apart).
+const DIAG_CODES: [&str; 3] = ["BUSBAR-4013", "BUSBAR-7087", "BUSBAR-4030"];
+
+/// The diagnostic ids as the Statement states them, [`DIAG_CODES`] in the same order.
 const DIAG_IDS: &[AbiStr] = &[
-    abi_str("BUSBAR-4013"),
-    abi_str("BUSBAR-7087"),
-    abi_str("BUSBAR-4030"),
+    abi_str(DIAG_CODES[0]),
+    abi_str(DIAG_CODES[1]),
+    abi_str(DIAG_CODES[2]),
 ];
+
+/// The concurrency the plugin states: calls the host may run on one instance at once. The instance
+/// holds only a read-mostly handle table, so this is the host's ceiling for a plugin, not a
+/// resource of ours.
+const CONCURRENCY: u32 = 1024;
 
 /// What the plugin states: its name, version, concurrency, diagnostics and auth tail.
 const STATEMENT: Statement = with_tail(
@@ -107,7 +115,7 @@ const STATEMENT: Statement = with_tail(
         diag_ids_len: DIAG_IDS.len(),
         mark_words: CARRIERS.as_ptr(),
         mark_words_len: CARRIERS.len(),
-        ..statement("busbar-auth-header", env!("CARGO_PKG_VERSION"), 1024)
+        ..statement("busbar-auth-header", env!("CARGO_PKG_VERSION"), CONCURRENCY)
     },
     TAIL,
 );

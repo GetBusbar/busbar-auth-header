@@ -78,6 +78,16 @@ fn blob(b: &'static str, fmt: u32, flags: u32) -> Blob {
     }
 }
 
+/// A caller's credential of raw `bytes` (not necessarily UTF-8).
+fn octets(b: &'static [u8]) -> Blob {
+    Blob {
+        ptr: b.as_ptr(),
+        len: b.len(),
+        fmt: BLOB_OCTETS,
+        flags: BLOB_SECRET,
+    }
+}
+
 fn json(b: &'static str) -> Blob {
     blob(b, BLOB_JSON, 0)
 }
@@ -311,6 +321,22 @@ fn script(p: &Plugin<Auth>) -> Vec<String> {
         secret("caller-tok"),
         (256, 4),
     ));
+    // A caller's credential no header value may carry (an illegal byte), and one that is not UTF-8:
+    // no field, and the bearer's note raised on the request (see EXPECTED_FOLDS).
+    t.push(fields(
+        p,
+        bearer,
+        MODE_PASSTHROUGH,
+        secret("caller\ntok"),
+        (256, 4),
+    ));
+    t.push(fields(
+        p,
+        bearer,
+        MODE_PASSTHROUGH,
+        octets(b"caller\xfftok"),
+        (256, 4),
+    ));
     t.push(fields(p, keyless, MODE_OWN, z(), (256, 4)));
     t.push(fields(p, 999, MODE_OWN, z(), (256, 4)));
     // THE QUERY STYLE: the credential as a query parameter the framer appends, flagged
@@ -418,6 +444,8 @@ const EXPECTED: &[&str] = &[
     "fields Ready  x-goog-api-key: caller-tok [flags=1]",
     "fields Ready  authorization: Bearer caller-tok [flags=1]",
     "fields Ready  ",
+    "fields Ready  ",
+    "fields Ready  ",
     "fields Refused ",
     "open_outbound query-key Ready ",
     "open_outbound query-key Ready ",
@@ -439,19 +467,27 @@ const EXPECTED: &[&str] = &[
     "close Ready",
 ];
 
-/// The folds every build must hand the host: each refusal's INFO line (`module = "header"`, its
+/// The folds every build must hand the host: the INFO line of an own credential that opens
+/// unpresentable, each refusal's INFO line (`module = "header"`, its
 /// reason, never a credential: AUTH-STANDARD S5), and the un-encodable bearer's WARN line on the
 /// one request that would have carried it (1.5.5 logged it per request), naming the bound protocol
 /// (none bound here: empty, as 1.5.5's override named none).
 const EXPECTED_FOLDS: &[&str] = &[
     "diag 4294967295 sev=0 busbar_auth_header::instance: header settings refused \
      module=\"header\" reason=\"not_object\"",
+    "diag 4294967295 sev=0 busbar_auth_header::instance: header binding opened with a \
+     credential it cannot present module=\"header\" style=\"bearer\" \
+     reason=\"unpresentable_credential\" header=\"\" protocol=\"\"",
     "diag 4294967295 sev=0 busbar_auth_header::instance: header binding refused \
      module=\"header\" style=\"sigv4\" reason=\"binding_refused\" refusal=settings: outbound \
      auth style `sigv4` is not served by this plugin",
     "diag 4294967295 sev=0 busbar_auth_header::instance: header binding refused \
      module=\"header\" style=\"kerberos\" reason=\"binding_refused\" refusal=settings: \
      outbound auth style `kerberos` is not served by this plugin",
+    "diag 1 sev=1 authorization credential contains invalid header bytes (ASCII control \
+     character); omitting auth header — upstream will reject with 401 protocol=",
+    "diag 1 sev=1 authorization credential contains invalid header bytes (ASCII control \
+     character); omitting auth header — upstream will reject with 401 protocol=",
     "diag 1 sev=1 authorization credential contains invalid header bytes (ASCII control \
      character); omitting auth header — upstream will reject with 401 protocol=",
     "diag 4294967295 sev=0 busbar_auth_header::instance: header fields refused \

@@ -35,7 +35,7 @@ use busbar_contract::abi::sdk::auth_kit::json_error;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
-use crate::present::{Family, Mode, Presentation, StaticScheme};
+use crate::present::{trim_ows, Family, Mode, Presentation, StaticScheme};
 
 /// `authorization: Bearer <credential>`.
 pub const BEARER: &str = "bearer";
@@ -118,8 +118,21 @@ pub enum Note {
     /// the header.
     Family(String, String),
     /// A query-parameter credential ([`QUERY_KEY`]) omitted for invalid bytes, naming the
-    /// parameter.
+    /// parameter. It raises the same diagnostic id as [`Note::Header`] (`BUSBAR-4013`, whose text
+    /// is about an omitted api-key credential); the line says `param=` where that one says
+    /// `header=`.
     Query(String),
+}
+
+impl Note {
+    /// The names the note carries, as `(header or parameter, protocol)`; empty where it names none.
+    pub fn names(&self) -> (&str, &str) {
+        match self {
+            Note::Header(h) | Note::Query(h) => (h, ""),
+            Note::Bearer(p) => ("", p),
+            Note::Family(p, h) => (h, p),
+        }
+    }
 }
 
 /// One open binding: the scheme, the fields its own credential presents (built once), and the
@@ -184,7 +197,7 @@ impl Binding {
     /// The note for a caller's `credential` that [`Self::passthrough`] presented as nothing; none
     /// for an empty one (no credential, nothing to report).
     pub fn passthrough_note(&self, credential: &str) -> Option<Note> {
-        (!credential.is_empty()).then(|| {
+        (!trim_ows(credential).is_empty()).then(|| {
             unpresented(
                 &self.scheme,
                 credential,
@@ -224,9 +237,28 @@ fn field<T: for<'de> Deserialize<'de>>(
     }
 }
 
-/// A non-blank string setting.
+/// A string setting: absent (or null) is `None`; present but blank is refused by name.
 fn text(m: &Map<String, Value>, key: &str) -> Result<Option<String>, Refusal> {
-    Ok(field::<String>(m, key)?.filter(|s| !s.trim().is_empty()))
+    match field::<String>(m, key)? {
+        Some(s) if s.trim().is_empty() => Err(blank(key)),
+        other => Ok(other),
+    }
+}
+
+/// The refusal for a blank string setting (`setting`: its name as the operator wrote it).
+fn blank(setting: &str) -> Refusal {
+    Refusal::Settings(format!(
+        "outbound auth setting `{setting}` must not be blank"
+    ))
+}
+
+/// Whether `name` is a query parameter name this plugin will present: non-empty, an RFC 9110 token
+/// (so no control character, space or `=`) that is also free of `&` and `#`, which would end the
+/// parameter or the query.
+fn is_param_name(name: &str) -> bool {
+    !name.is_empty()
+        && busbar_contract::header::is_header_name_token(name.as_bytes())
+        && !name.contains(['&', '#'])
 }
 
 /// A style's scheme: its default presentation, overridden by the settings.
@@ -234,6 +266,11 @@ fn static_scheme(style: &str, m: &Map<String, Value>) -> Result<StaticScheme, Re
     if style == QUERY_KEY {
         // One parameter, the credential verbatim; the header settings do not apply to it.
         let param = text(m, "param")?;
+        if param.as_deref().is_some_and(|p| !is_param_name(p)) {
+            return Err(Refusal::Settings(
+                "outbound auth setting `param` is not a query parameter name".to_string(),
+            ));
+        }
         return Ok(StaticScheme::uniform(Presentation::raw(
             param.as_deref().unwrap_or(QUERY_KEY_DEFAULT_PARAM),
         )));
@@ -254,6 +291,9 @@ fn static_scheme(style: &str, m: &Map<String, Value>) -> Result<StaticScheme, Re
     let mut scheme = StaticScheme::uniform(default);
     if let Some(mut families) = field::<Vec<Family>>(m, "families")? {
         for (i, family) in families.iter_mut().enumerate() {
+            if family.prefix.trim().is_empty() {
+                return Err(blank(&format!("families[{i}].prefix")));
+            }
             header_name(&format!("families[{i}].header"), &mut family.presented)?;
         }
         scheme.families = families;
@@ -342,15 +382,21 @@ pub fn open_binding(
     let protocol = text(&m, "protocol")
         .map_err(|r| vec![r])?
         .unwrap_or_default();
+    if protocol.chars().any(char::is_control) {
+        return Err(vec![Refusal::Settings(
+            "outbound auth setting `protocol` has a control character".to_string(),
+        )]);
+    }
     // NO CREDENTIAL ⇒ NO AUTH HEADER: an empty key is a keyless upstream
     // (`api_key: none`), and an empty `Authorization: Bearer ` is strictly worse than nothing.
+    // (blank after trimming SP/HTAB counts as empty: a field value never carries them).
     let credential_text = credential_text.unwrap_or("");
-    let own = if credential_text.is_empty() {
+    let own = if trim_ows(credential_text).is_empty() {
         Vec::new()
     } else {
         scheme.present(credential_text, Mode::Own)
     };
-    let own_note = (!credential_text.is_empty() && own.is_empty()).then(|| {
+    let own_note = (!trim_ows(credential_text).is_empty() && own.is_empty()).then(|| {
         unpresented(
             &scheme,
             credential_text,

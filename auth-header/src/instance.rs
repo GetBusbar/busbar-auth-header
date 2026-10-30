@@ -27,7 +27,8 @@ use crate::style::{self, Binding, Note};
 
 /// The index of each diagnostic id in the Statement (`crate::DIAG_IDS`).
 pub(crate) mod diag {
-    /// A static header omitted for invalid bytes.
+    /// A static header, or a query parameter ([`Note::Query`]), omitted for invalid bytes
+    /// (`BUSBAR-4013`; the named value, `header=` or `param=`, tells the two apart).
     pub const APIKEY_INVALID_BYTES: u32 = 0;
     /// A bearer omitted for invalid bytes.
     pub const AUTH_INVALID_HEADER_BYTES: u32 = 1;
@@ -133,13 +134,16 @@ impl Header {
     }
 
     /// Keep `binding` under a new handle of the current generation.
+    ///
+    /// THE LOCK RULE: the generation is read, and the handle stored, under the handles WRITE lock;
+    /// [`OutboundPlugin::refresh`] stores the new generation under that same lock and
+    /// [`OutboundPlugin::retire`] sweeps under it. The three are therefore ordered: a handle can
+    /// never be stored under a generation a retire has already swept (it would then never drop).
     pub(crate) fn keep(&self, binding: Binding) -> u64 {
         let handle = self.next_handle.fetch_add(1, Ordering::Relaxed);
+        let mut handles = self.handles.write().unwrap_or_else(PoisonError::into_inner);
         let generation = self.generation.load(Ordering::Acquire);
-        self.handles
-            .write()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(handle, (generation, binding));
+        handles.insert(handle, (generation, binding));
         handle
     }
 
@@ -176,7 +180,23 @@ impl OutboundPlugin for Header {
     ) -> Result<u64, OpenRefusal> {
         let opened = style::open_binding(style, credential, settings);
         match opened {
-            Ok(binding) => Ok(self.keep(binding)),
+            Ok(binding) => {
+                // An own credential no header value may carry opens (the request goes without an
+                // auth header); say so once here, by the names the operator configured, never the
+                // credential. Each request raises its own note besides.
+                if let Some(note) = binding.own_note() {
+                    let (header, protocol) = note.names();
+                    tracing::info!(
+                        module = "header",
+                        style,
+                        reason = "unpresentable_credential",
+                        header,
+                        protocol,
+                        "header binding opened with a credential it cannot present"
+                    );
+                }
+                Ok(self.keep(binding))
+            }
             Err(refusals) => {
                 let lines: Vec<String> = refusals.iter().map(style::Refusal::line).collect();
                 // The lines name a setting or the credential's encoding, never a value.
@@ -288,6 +308,8 @@ impl OutboundPlugin for Header {
     /// The new generation, later handles belong to.
     fn refresh(&self, b: &[u8], _secrets: &[&[u8]], generation: u64) -> Result<(), Refusal> {
         settings(b)?;
+        // Under the handles write lock (the lock rule, see `keep`).
+        let _handles = self.handles.write().unwrap_or_else(PoisonError::into_inner);
         self.generation.store(generation, Ordering::Release);
         Ok(())
     }

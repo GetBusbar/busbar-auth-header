@@ -381,3 +381,129 @@ fn an_unknown_settings_key_is_refused_by_name() {
         assert!(open(style, Some("k"), provider).0.is_ok(), "{style}");
     }
 }
+
+/// F1: A FIELD VALUE NEVER HAS LEADING OR TRAILING WHITESPACE (RFC 9110 §5.5; a receiver strips OWS).
+/// Every presentation (raw, bearer, query; own and passthrough) presents the credential with
+/// surrounding SP/HTAB removed, `trim_start` or not, and a credential blank after trimming presents
+/// nothing and raises no note.
+#[test]
+fn a_credential_is_presented_without_surrounding_whitespace() {
+    let pair = |n: &str, v: &str| vec![(n.to_string(), v.to_string())];
+    for (style, settings, name, value) in [
+        (API_KEY, "{}", "api-key", "sk-1"),
+        (BEARER, "{}", "authorization", "Bearer sk-1"),
+        (X_GOOG_API_KEY, "{}", "x-goog-api-key", "sk-1"),
+        (QUERY_KEY, "{}", "key", "sk-1"),
+        (
+            API_KEY,
+            r#"{"own":{"header":"api-key","trim_start":true}}"#,
+            "api-key",
+            "sk-1",
+        ),
+    ] {
+        let (b, _) = open(style, Some(" \t sk-1 \t "), settings);
+        let b = b.expect("opens");
+        assert_eq!(b.own().plain(), pair(name, value), "own {style} {settings}");
+        assert_eq!(
+            b.passthrough("\t sk-1  ").plain(),
+            pair(name, value),
+            "passthrough {style} {settings}"
+        );
+    }
+    for style in [BEARER, API_KEY, QUERY_KEY] {
+        let (b, notes) = open(style, Some(" \t "), "{}");
+        let b = b.expect("opens");
+        assert!(
+            b.own().is_empty(),
+            "{style}: a blank credential presents nothing"
+        );
+        assert!(
+            notes.is_empty(),
+            "{style}: and is no unpresentable credential"
+        );
+        assert!(b.passthrough(" \t").is_empty());
+        assert!(!b.present_passthrough("  ", |_, _| panic!("emitted")));
+        assert_eq!(b.passthrough_note("  "), None);
+    }
+}
+
+/// F2: a present-but-blank top-level `header` / `param` / `protocol` is refused by name like the
+/// nested ones; absent (or null) keeps the default.
+#[test]
+fn a_blank_top_level_string_setting_is_refused_by_name() {
+    for (style, key) in [
+        (API_KEY, "header"),
+        (X_GOOG_API_KEY, "header"),
+        (QUERY_KEY, "param"),
+        (BEARER, "protocol"),
+        (API_KEY, "protocol"),
+    ] {
+        for blank in ["", "  ", "\\t"] {
+            let settings = format!(r#"{{"{key}":"{blank}"}}"#);
+            assert_eq!(
+                lines(open(style, Some("k"), &settings).0),
+                [format!(
+                    "settings: outbound auth setting `{key}` must not be blank"
+                )],
+                "{style} {settings}"
+            );
+        }
+        let settings = format!(r#"{{"{key}":null}}"#);
+        assert!(open(style, Some("k"), &settings).0.is_ok(), "{settings}");
+    }
+}
+
+/// F3: a `families` row whose `prefix` is empty (or whitespace) would capture every credential; it
+/// is refused by name.
+#[test]
+fn a_blank_family_prefix_is_refused_by_name() {
+    for prefix in ["", " ", "\\t"] {
+        let settings = format!(r#"{{"families":[{{"prefix":"sk-"}},{{"prefix":"{prefix}"}}]}}"#);
+        assert_eq!(
+            lines(open(BEARER, Some("k"), &settings).0),
+            ["settings: outbound auth setting `families[1].prefix` must not be blank"],
+            "{settings}"
+        );
+    }
+}
+
+/// F4: `param` is a non-empty RFC 3986 unreserved-or-token name (no CTL, SP, `=`, `&`, `#`), and
+/// `protocol` carries no control character, so neither reaches a log line as injected text.
+#[test]
+fn param_and_protocol_are_validated() {
+    for bad in [
+        "a b",
+        "a=b",
+        "a&b",
+        "a#b",
+        "a\\nb",
+        "a\\u0000b",
+        "a\\u007fb",
+        "é",
+    ] {
+        let settings = format!(r#"{{"param":"{bad}"}}"#);
+        assert_eq!(
+            lines(open(QUERY_KEY, Some("k"), &settings).0),
+            ["settings: outbound auth setting `param` is not a query parameter name"],
+            "{settings}"
+        );
+    }
+    for good in ["key", "api_key", "api-key", "X.Key~1"] {
+        let settings = format!(r#"{{"param":"{good}"}}"#);
+        assert!(
+            open(QUERY_KEY, Some("k"), &settings).0.is_ok(),
+            "{settings}"
+        );
+    }
+    for bad in ["a\\nb", "a\\r\\nb", "a\\u0000b", "a\\u001bb", "a\\u007fb"] {
+        let settings = format!(r#"{{"protocol":"{bad}"}}"#);
+        assert_eq!(
+            lines(open(BEARER, Some("k"), &settings).0),
+            ["settings: outbound auth setting `protocol` has a control character"],
+            "{settings}"
+        );
+    }
+    assert!(open(BEARER, Some("k"), r#"{"protocol":"open ai-1"}"#)
+        .0
+        .is_ok());
+}

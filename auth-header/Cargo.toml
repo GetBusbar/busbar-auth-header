@@ -6,7 +6,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "The header-presentation auth styles (bearer, api-key, x-goog-api-key), each served in both the operator's own credential and the caller's verified credential, as one auth-kind plugin on the auth kind's memory ABI."
+description = "The header-presentation auth styles (bearer, api-key, x-goog-api-key, query-key), each served in both the operator's own credential and the caller's verified credential, as one auth-kind plugin on the auth kind's memory ABI."
 
 [lib]
 # rlib only: the LINKED door (`busbar_auth_header::door`, the `DoorFn` a compiled-in row holds) and the

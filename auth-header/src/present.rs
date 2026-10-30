@@ -115,17 +115,26 @@ impl StaticScheme {
         mode: Mode,
         emit: impl FnOnce(&[u8], &[u8]),
     ) -> bool {
+        // A field value never has leading or trailing whitespace (RFC 9110 §5.5): every
+        // presentation carries the credential with its surrounding SP/HTAB removed, and a
+        // credential that is empty after trimming presents nothing.
+        let credential = trim_ows(credential);
+        if credential.is_empty() {
+            return false;
+        }
         match self.presentation(credential, mode) {
             Presentation {
                 header: Some(header),
                 trim_start,
             } => {
+                // `trim_start` is subsumed by the trim above; kept for the Unicode whitespace it
+                // alone removed.
                 let key = if *trim_start {
                     credential.trim_start()
                 } else {
                     credential
                 };
-                if !is_legal_header_value(key) {
+                if key.is_empty() || !is_legal_header_value(key) {
                     return false;
                 }
                 emit(header.as_bytes(), key.as_bytes());
@@ -152,6 +161,12 @@ impl StaticScheme {
         });
         fields
     }
+}
+
+/// `s` with its leading and trailing optional whitespace (SP and HTAB, RFC 9110 §5.6.3) removed:
+/// what an HTTP receiver sees of a field value.
+pub(crate) fn trim_ows(s: &str) -> &str {
+    s.trim_matches([' ', '\t'])
 }
 
 /// The longest bearer value [`StaticScheme::present_with`] stages on the stack.
