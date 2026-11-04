@@ -1,0 +1,486 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (C) 2026 Busbar Inc and contributors
+
+//! THE HANDLE BOOKKEEPING over the plugin's own `OutboundPlugin` methods — no mint, no wire, no
+//! waiting ticket. The `fields` call itself is driven through the door, both ways, by the plugin
+//! crate's `tests/conformance.rs` and `tests/fields_alloc.rs`.
+
+use super::*;
+
+fn open(h: &Header, style: &str, cred: Option<&str>, settings: &str) -> (u64, Diags) {
+    let mut diags = Diags::default();
+    let handle = h
+        .open_outbound(
+            style,
+            cred.map(str::as_bytes),
+            Some(settings.as_bytes()),
+            None,
+            &mut diags,
+        )
+        .expect("the binding opens");
+    (handle, diags)
+}
+
+#[test]
+fn a_handle_is_ready_until_its_generation_retires() {
+    let h = Header::new(1);
+    let (first, _) = open(&h, style::BEARER, Some("sk-1"), "{}");
+    assert!(h.outbound_ready(first));
+    h.refresh(b"{}", &[], 2).expect("the reload is taken");
+    let (second, _) = open(&h, style::BEARER, Some("sk-1"), "{}");
+    h.retire(1);
+    assert!(!h.outbound_ready(first), "generation 1's handle is gone");
+    assert!(h.outbound_ready(second), "generation 2's stays");
+    assert!(!h.outbound_ready(999), "a handle never opened");
+}
+
+/// BAD PLUGIN SETTINGS ANSWER FAILED, ALIKE AT VALIDATE, OPEN AND REFRESH (AUTH-STANDARD S2), in
+/// the contract's instance-relative lines: settings that are not an object, and every key no style
+/// reads, by name. The keys a style reads are accepted, and a refused refresh leaves the instance
+/// serving its old generation.
+#[test]
+fn bad_settings_fail_alike_at_validate_open_and_refresh() {
+    use busbar_contract::abi::mechanism::call::Outcome;
+    use busbar_contract::abi::mechanism::lifecycle::check_validate_refusal;
+    let cases: [(&[u8], &str); 4] = [
+        (b"[1]", "settings: must be a JSON object"),
+        (b"nope", "settings: must be a JSON object"),
+        (br#"{"heder":"x"}"#, "settings.heder: unknown key"),
+        (
+            br#"{"a":1,"param":"key","b":2}"#,
+            "settings.a: unknown key\nsettings.b: unknown key",
+        ),
+    ];
+    for (bad, text) in cases {
+        let h = Header::new(1);
+        let (handle, _) = open(&h, style::BEARER, Some("sk-1"), "{}");
+        for r in [
+            Header::validate(bad).expect_err("validate refuses"),
+            Header::open(bad, &[], 1).expect_err("open refuses"),
+            h.refresh(bad, &[], 2).expect_err("refresh refuses"),
+        ] {
+            assert_eq!(r.outcome(), Outcome::Failed);
+            assert_eq!(r.text(), Some(text));
+            check_validate_refusal(text.as_bytes()).expect("the contract's line form");
+        }
+
+        let (after, _) = open(&h, style::BEARER, Some("sk-1"), "{}");
+        h.retire(2);
+        assert!(
+            h.outbound_ready(handle) && h.outbound_ready(after),
+            "retiring the refused generation removes nothing"
+        );
+        h.retire(1);
+        assert!(
+            !h.outbound_ready(handle) && !h.outbound_ready(after),
+            "the refused refresh moved no generation"
+        );
+    }
+    for good in [
+        &b""[..],
+        b"{}",
+        br#"{"param":"key","header":"x-api-key","families":[],"own":{},"passthrough":{},"protocol":"p"}"#,
+        br#"{"token_url":"https://t.example/","token_uri":"u","scope":"s","subject":"x"}"#,
+    ] {
+        assert!(Header::validate(good).is_ok());
+        assert!(Header::open(good, &[], 1).is_ok());
+        assert!(Header::new(1).refresh(good, &[], 2).is_ok());
+    }
+}
+
+#[test]
+fn a_refused_binding_answers_one_line_per_finding() {
+    let h = Header::new(1);
+    let mut diags = Diags::default();
+    let refusal = h
+        .open_outbound("sigv4", Some(b"k"), Some(b"{}"), None, &mut diags)
+        .expect_err("not served");
+    assert_eq!(
+        refusal.lines(),
+        ["settings: outbound auth style `sigv4` is not served by this plugin"]
+    );
+}
+
+/// AN UNPRESENTABLE OWN CREDENTIAL IS NOTED ON EACH REQUEST, NOT AT OPEN: 1.5.5 built the header
+/// per request and logged its builder's WARN line each time. The binding opens with no diagnostic
+/// and holds the note `fields` raises per call.
+#[test]
+fn an_unpresentable_own_credential_is_noted_on_each_request_not_at_open() {
+    let h = Header::new(1);
+    let (handle, diags) = open(
+        &h,
+        style::API_KEY,
+        Some("bad\nkey"),
+        r#"{"header":"api-key"}"#,
+    );
+    assert_eq!(diags.iter().count(), 0, "nothing at open");
+    let note = h
+        .with_binding(handle, |b| b.own_note().cloned())
+        .flatten()
+        .expect("the per-request note");
+    let (id, severity, text) = note_line(&note);
+    assert_eq!(id, diag::APIKEY_INVALID_BYTES);
+    assert_eq!(severity, SEVERITY_WARN);
+    assert!(text.ends_with("upstream will reject with 401 header=api-key"));
+    let (fine, _) = open(&h, style::API_KEY, Some("good"), r#"{"header":"api-key"}"#);
+    assert_eq!(h.with_binding(fine, |b| b.own_note().cloned()), Some(None));
+}
+
+#[test]
+fn note_line_reports_each_note_in_its_own_line() {
+    let lines: Vec<_> = [
+        style::Note::Header("api-key".to_string()),
+        style::Note::Bearer("twin".to_string()),
+        style::Note::Family("twin".to_string(), "x-api-key".to_string()),
+    ]
+    .iter()
+    .map(note_line)
+    .collect();
+    assert_eq!(lines[0].0, diag::APIKEY_INVALID_BYTES);
+    assert_eq!(lines[1].0, diag::AUTH_INVALID_HEADER_BYTES);
+    assert_eq!(lines[2].0, diag::CREDENTIAL_INVALID_BYTES);
+    assert_eq!(
+        (lines[0].1, lines[1].1, lines[2].1),
+        (SEVERITY_WARN, SEVERITY_WARN, SEVERITY_WARN)
+    );
+    assert!(lines[0]
+        .2
+        .ends_with("upstream will reject with 401 header=api-key"));
+    assert!(lines[1]
+        .2
+        .ends_with("upstream will reject with 401 protocol=twin"));
+    assert!(lines[2]
+        .2
+        .ends_with("check the key configuration protocol=twin header=x-api-key"));
+}
+
+/// A caller's credential is presented by reference with the bytes the owned presentation builds,
+/// a bearer longer than the stack stage included; one no header value may carry emits nothing.
+#[test]
+fn a_callers_credential_is_presented_by_reference_with_the_owned_bytes() {
+    let h = Header::new(1);
+    let (handle, _) = open(&h, style::BEARER, None, "{}");
+    let long = "k".repeat(crate::present::STACK_VALUE * 2);
+    assert!(
+        long.len() + "Bearer ".len() > crate::present::STACK_VALUE,
+        "the heap branch"
+    );
+    let long_expected = format!("Bearer {long}");
+    // Bearer totals of exactly STACK_VALUE and STACK_VALUE + 1: either side of the stack/heap guard.
+    let edge = crate::present::STACK_VALUE - "Bearer ".len();
+    let at_edge = "k".repeat(edge);
+    let past_edge = "k".repeat(edge + 1);
+    let at_edge_expected = format!("Bearer {at_edge}");
+    let past_edge_expected = format!("Bearer {past_edge}");
+    assert_eq!(at_edge_expected.len(), crate::present::STACK_VALUE);
+    assert_eq!(past_edge_expected.len(), crate::present::STACK_VALUE + 1);
+    for (caller, expected) in [
+        ("caller-tok", "Bearer caller-tok"),
+        (at_edge.as_str(), at_edge_expected.as_str()),
+        (past_edge.as_str(), past_edge_expected.as_str()),
+        (long.as_str(), long_expected.as_str()),
+    ] {
+        let by_ref = h
+            .with_binding(handle, |b| {
+                let mut got = None;
+                let presented = b.present_passthrough(caller, |n, v| {
+                    got = Some((n.to_vec(), v.to_vec()));
+                });
+                assert!(presented);
+                got
+            })
+            .flatten()
+            .expect("a field");
+        let owned = h
+            .with_binding(handle, |b| b.passthrough(caller))
+            .expect("the binding");
+        assert_eq!(by_ref.0, b"authorization");
+        assert_eq!(by_ref.1, expected.as_bytes());
+        assert_eq!(owned.len(), 1);
+        assert_eq!(owned[0].0, "authorization");
+        assert!(owned[0].1.verify_eq(expected.as_bytes()));
+    }
+    let none = h.with_binding(handle, |b| b.present_passthrough("bad\nkey", |_, _| ()));
+    assert_eq!(none, Some(false));
+    let none = h.with_binding(handle, |b| b.present_passthrough("", |_, _| ()));
+    assert_eq!(none, Some(false));
+}
+
+#[test]
+fn a_bindings_debug_never_prints_its_credential() {
+    let h = Header::new(1);
+    let (handle, _) = open(&h, style::BEARER, Some("operator-secret"), "{}");
+    let shown = h
+        .with_binding(handle, |b| format!("{b:?}"))
+        .expect("the binding");
+    assert!(!shown.contains("operator-secret"), "{shown}");
+}
+
+/// EVERY REFUSAL IS LOGGED ONCE AT INFO, `module = "header"`, with a reason and never the
+/// credential (AUTH-STANDARD S5): bad plugin settings at validate, open and refresh, and a binding
+/// `open_outbound` refuses.
+#[test]
+fn every_refusal_is_logged_once_at_info_without_the_credential() {
+    let cap = RefusalLog::default();
+    tracing::subscriber::with_default(cap.subscriber(), || {
+        let _ = Header::validate(b"[1]");
+        let _ = Header::open(br#"{"heder":1}"#, &[], 1);
+        let h = Header::new(1);
+        let _ = h.refresh(b"nope", &[], 2);
+        let mut diags = Diags::default();
+        let _ = h.open_outbound(
+            style::BEARER,
+            Some(b"sk-operator-secret"),
+            Some(br#"{"heder":"x"}"#),
+            None,
+            &mut diags,
+        );
+        let _ = h.open_outbound(
+            style::BEARER,
+            Some(b"\xffsk-operator-secret"),
+            None,
+            None,
+            &mut diags,
+        );
+    });
+    let lines = cap.messages();
+    assert_eq!(lines.len(), 5, "{lines:?}");
+    for line in &lines {
+        assert!(
+            line.contains("module=\"header\"") || line.contains("module=header"),
+            "{line}"
+        );
+        assert!(line.contains("reason="), "{line}");
+        assert!(!line.contains("sk-operator-secret"), "{line}");
+    }
+    assert_eq!(cap.count("settings refused"), 3, "{lines:?}");
+    assert_eq!(cap.count("binding refused"), 2, "{lines:?}");
+}
+
+/// A BINDING THAT CANNOT PRESENT IS NOT READY (AUTH-STANDARD S3): an own credential no header value
+/// may carry opens (each request is noted) but the health prober sees it unready. A keyless binding
+/// and a presentable one stay ready.
+#[test]
+fn a_binding_whose_own_credential_cannot_be_presented_is_not_ready() {
+    let h = Header::new(1);
+    let (bad, _) = open(&h, style::BEARER, Some("sk\r\ninjected"), "{}");
+    let (keyless, _) = open(&h, style::BEARER, None, "{}");
+    let (fine, _) = open(&h, style::API_KEY, Some("k"), "{}");
+    assert!(!h.outbound_ready(bad));
+    assert!(h.outbound_ready(keyless));
+    assert!(h.outbound_ready(fine));
+}
+
+#[test]
+fn an_unpresentable_own_credential_logs_one_info_line_at_open() {
+    let cap = RefusalLog::default();
+    tracing::subscriber::with_default(cap.subscriber(), || {
+        let h = Header::new(1);
+        let _ = open(
+            &h,
+            style::API_KEY,
+            Some("sk-secret\nx"),
+            r#"{"header":"x-key"}"#,
+        );
+        let _ = open(
+            &h,
+            style::BEARER,
+            Some("sk-secret\nx"),
+            r#"{"protocol":"twin"}"#,
+        );
+        let _ = open(&h, style::API_KEY, Some("fine"), "{}");
+        let _ = open(&h, style::API_KEY, None, "{}");
+    });
+    let lines = cap.messages();
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    for line in &lines {
+        assert!(
+            line.contains("module=\"header\"") || line.contains("module=header"),
+            "{line}"
+        );
+        assert!(
+            line.contains("reason=\"unpresentable_credential\"")
+                || line.contains("reason=unpresentable_credential"),
+            "{line}"
+        );
+        assert!(!line.contains("sk-secret"), "{line}");
+    }
+    assert!(lines[0].contains("x-key"), "{}", lines[0]);
+    assert!(lines[1].contains("twin"), "{}", lines[1]);
+}
+
+/// AN UNPRESENTABLE QUERY CREDENTIAL'S OPEN LINE NAMES ITS PARAMETER AS `param`, not as a header.
+/// RED before the fix: the line said `header="key"`.
+#[test]
+fn an_unpresentable_query_credential_logs_its_parameter_as_param_at_open() {
+    let cap = RefusalLog::default();
+    tracing::subscriber::with_default(cap.subscriber(), || {
+        let h = Header::new(1);
+        let _ = open(&h, style::QUERY_KEY, Some("sk-secret\nx"), "{}");
+    });
+    let lines = cap.messages();
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    let line = &lines[0];
+    assert!(
+        line.contains("param=\"key\"") || line.contains("param=key"),
+        "{line}"
+    );
+    assert!(!line.contains("header="), "{line}");
+    assert!(!line.contains("sk-secret"), "{line}");
+}
+
+#[test]
+fn a_handle_kept_while_the_generation_moves_takes_the_new_generation() {
+    let h = std::sync::Arc::new(Header::new(1));
+    let guard = h.handles.write().unwrap();
+    let (started, wait) = std::sync::mpsc::channel();
+    let kept = {
+        let h = h.clone();
+        std::thread::spawn(move || {
+            let binding = style::open_binding(style::BEARER, Some(b"sk-1"), None).unwrap();
+            started.send(()).unwrap();
+            h.keep(binding)
+        })
+    };
+    wait.recv().unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    h.generation.store(2, Ordering::Release);
+    drop(guard);
+    let handle = kept.join().unwrap();
+    h.retire(1);
+    assert!(
+        h.outbound_ready(handle),
+        "kept after the move: generation 2's"
+    );
+    h.retire(2);
+    assert!(!h.outbound_ready(handle));
+}
+
+#[test]
+fn keep_refresh_retire_are_ordered() {
+    let h = Header::new(1);
+    let (a, _) = open(&h, style::BEARER, Some("k"), "{}");
+    h.refresh(b"{}", &[], 2).unwrap();
+    let (b, _) = open(&h, style::BEARER, Some("k"), "{}");
+    h.retire(1);
+    let held: Vec<u64> = h
+        .handles
+        .read()
+        .unwrap()
+        .values()
+        .map(|(g, _)| *g)
+        .collect();
+    assert_eq!(held, [2]);
+    assert!(!h.outbound_ready(a) && h.outbound_ready(b));
+}
+
+#[test]
+fn an_empty_selected_unicode_presentation_is_ready_and_is_not_logged_as_invalid_bytes() {
+    let capture = RefusalLog::default();
+    tracing::subscriber::with_default(capture.subscriber(), || {
+        let header = Header::new(1);
+        let (handle, _) = open(
+            &header,
+            style::API_KEY,
+            Some("\u{2003}"),
+            r#"{"own":{"header":"x-key","trim_start":true}}"#,
+        );
+        assert!(header.outbound_ready(handle));
+        assert!(header
+            .with_binding(handle, |binding| binding.own().is_empty())
+            .unwrap());
+    });
+    assert_eq!(
+        capture.count("unpresentable_credential"),
+        0,
+        "{:?}",
+        capture.messages()
+    );
+}
+
+#[test]
+fn a_refused_binding_does_not_remove_a_live_binding_or_poison_later_opens() {
+    let header = Header::new(7);
+    let (old, _) = open(
+        &header,
+        style::API_KEY,
+        Some("first"),
+        r#"{"header":"x-key"}"#,
+    );
+    let mut diagnostics = Diags::default();
+    assert!(header
+        .open_outbound(
+            style::API_KEY,
+            Some(b"CREDENTIAL-CANARY"),
+            Some(br#"{"header":"Content-Length"}"#),
+            None,
+            &mut diagnostics
+        )
+        .is_err());
+    assert!(header.outbound_ready(old));
+    assert_eq!(
+        header
+            .with_binding(old, |binding| binding.own()[0].0.clone())
+            .unwrap(),
+        "x-key"
+    );
+    let (later, _) = open(
+        &header,
+        style::API_KEY,
+        Some("later"),
+        r#"{"header":"x-key"}"#,
+    );
+    assert!(header.outbound_ready(later));
+    assert_eq!(
+        header
+            .with_binding(later, |binding| binding.own()[0].0.clone())
+            .unwrap(),
+        "x-key"
+    );
+    header.retire(7);
+    assert!(!header.outbound_ready(old));
+    assert!(!header.outbound_ready(later));
+}
+
+// This test-local writer records this plugin's refusal events, including their fields.
+#[derive(Clone, Default)]
+struct RefusalLog(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+impl std::io::Write for RefusalLog {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+impl RefusalLog {
+    fn subscriber(&self) -> impl tracing::Subscriber + Send + Sync {
+        use tracing_subscriber::{layer::SubscriberExt, Layer};
+        let writer = self.clone();
+        // Parallel captures must consult this dispatch rather than cache a static callsite filter.
+        let filter = tracing_subscriber::filter::dynamic_filter_fn(|metadata, _| {
+            *metadata.level() <= tracing::Level::DEBUG
+        });
+        tracing_subscriber::registry().with(
+            tracing_subscriber::fmt::layer()
+                .without_time()
+                .with_ansi(false)
+                .with_writer(move || writer.clone())
+                .with_filter(filter),
+        )
+    }
+    fn messages(&self) -> Vec<String> {
+        String::from_utf8(self.0.lock().unwrap().clone())
+            .unwrap()
+            .lines()
+            .map(str::to_owned)
+            .collect()
+    }
+    fn count(&self, text: &str) -> usize {
+        self.messages()
+            .iter()
+            .filter(|line| line.contains(text))
+            .count()
+    }
+}

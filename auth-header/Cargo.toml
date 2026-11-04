@@ -1,21 +1,37 @@
 # SPDX-License-Identifier: Apache-2.0
 [package]
 name = "busbar-auth-header"
-version = "0.1.0"
+version = "1.6.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "The header auth: the logic a busbar build links (its door), and nothing else."
+description = "The header-presentation auth styles (bearer, api-key, x-goog-api-key, query-key), each served in both the operator's own credential and the caller's verified credential, as one auth-kind plugin on the auth kind's memory ABI."
+
+[lints]
+workspace = true
 
 [lib]
-# rlib: the LINKED door, which a busbar build names as a compiled-in row. The dropped-in door is the
-# sibling `busbar-auth-header-plugin` cdylib, which exports this same door as its one symbol; this crate exports none.
+# rlib only: the LINKED door (`busbar_auth_header::door`, the `DoorFn` a compiled-in row holds) and the
+# tests. The DROPPED door is the sibling `busbar-auth-header-plugin` cdylib, the same door behind the
+# one exported symbol.
 crate-type = ["rlib"]
 
-# DEPENDENCY POLICY. A plugin's busbar closure is busbar-contract and nothing else; third-party crates
-# come from the workspace table (`{ workspace = true }`), which is busbar's dependency policy. No
-# plugin opens its own socket, dials, binds or does TLS: a connection is a declared need the kernel
-# serves through the connector.
+# DEPENDENCY POLICY. A plugin's closure is `busbar-contract` plus the third-party crates it needs to
+# do its job (owner ruling 2026-09-28, PLUGIN LIBRARIES): JSON settings parsing, logging and wiped
+# credential storage. No kernel crate, no plane, no sibling auth-kind plugin.
+# Every version is the workspace table's (busbar's at the pin).
 [dependencies]
 busbar-contract = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+# Each refusal is logged (its reason, never the credential) into the plugin's own log: the SDK
+# captures `tracing` per call.
+tracing = { workspace = true }
+# Auth material is wiped on drop (BUSBAR-1.6.0.md THE DESIGN §6: "auth material is zeroised").
+zeroize = { workspace = true }
+
+[dev-dependencies]
+# The sealed signing fixture helpers are enabled only in tests.
+busbar-contract = { workspace = true, features = ["test-seal"] }
+tracing-subscriber = { workspace = true, features = ["fmt"] }

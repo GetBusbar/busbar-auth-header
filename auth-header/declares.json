@@ -1,6 +1,13 @@
 {
-  "contract_abi": {
-    "min": 3,
-    "max": 3
-  }
+  "diagnostics": [
+    {
+      "code": 4030,
+      "slug": "credential-invalid-bytes",
+      "title": "Auth credential contains invalid header bytes (credential header omitted)",
+      "severity": "actionable",
+      "summary": "A credential under a scheme configured with a credential-family table contains bytes invalid in an HTTP header value (for example a trailing newline), so the plugin omits the credential header. This also applies when no family prefix matches. It is raised on each request that would have carried the header, naming the protocol and the header; an unpresentable own credential is also logged once at open.",
+      "action": "Fix the credential's configured value (strip the control character, often a trailing newline from a file or env source). Requests omit the credential until it is fixed and may be refused by the upstream.",
+      "since": "1.6.0"
+    }
+  ]
 }
