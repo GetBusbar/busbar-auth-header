@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Header auth lifecycle settings",
+  "description": "A closed bag of keys shared by the outbound styles. Values and style-specific defaults are checked at open_outbound, not lifecycle validate; no style is selected by this document. Credentials are lent separately. An absent settings blob is equivalent to {}.",
+  "type": "object",
+  "default": {},
+  "properties": {
+    "header": {
+      "description": "Custom header name, checked when the selected style is bound. Lifecycle validation accepts any JSON value for this known key."
+    },
+    "families": {
+      "description": "Credential-family presentations, checked at binding. Lifecycle validation accepts any JSON value for this known key."
+    },
+    "own": {
+      "description": "Own-credential presentation, checked at binding. Lifecycle validation accepts any JSON value for this known key."
+    },
+    "passthrough": {
+      "description": "Caller-credential presentation, checked at binding. Lifecycle validation accepts any JSON value for this known key."
+    },
+    "protocol": {
+      "description": "Protocol label, checked at binding. Lifecycle validation accepts any JSON value for this known key."
+    },
+    "param": {
+      "description": "Query parameter name, checked at binding. Lifecycle validation accepts any JSON value for this known key."
+    },
+    "token_url": {
+      "description": "Forwarded provider setting; ignored by this plugin, including its value."
+    },
+    "token_uri": {
+      "description": "Forwarded provider setting; ignored by this plugin, including its value."
+    },
+    "scope": {
+      "description": "Forwarded provider setting; ignored by this plugin, including its value."
+    },
+    "subject": {
+      "description": "Forwarded provider setting; ignored by this plugin, including its value."
+    }
+  },
+  "additionalProperties": false
+}
