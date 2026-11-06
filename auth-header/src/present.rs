@@ -150,7 +150,7 @@ impl StaticScheme {
                 if !is_legal_header_value(credential) {
                     return false;
                 }
-                with_bearer(credential, |value| emit(b"authorization", value));
+                with_bearer(credential, |value| emit(BEARER_HEADER.as_bytes(), value));
                 true
             }
         }
@@ -178,6 +178,9 @@ pub(crate) fn trim_ows(s: &str) -> &str {
 
 /// The longest bearer value [`StaticScheme::present_with`] stages on the stack.
 pub const STACK_VALUE: usize = 1024;
+
+/// The header a bearer presents in.
+pub(crate) const BEARER_HEADER: &str = "authorization";
 
 /// The bearer scheme's prefix, as `busbar_contract::header::token_value` writes it.
 const BEARER_PREFIX: &[u8] = b"Bearer ";

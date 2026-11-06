@@ -70,50 +70,63 @@ fn settings(b: &[u8]) -> Result<(), LifecycleRefusal> {
     }
 }
 
-/// The diagnostic a note raises: the message, then the line's named values as ` name=value`
-/// (names and reasons only, never credential bytes).
-pub(crate) fn note_line(n: &Note) -> (u32, u8, String) {
+/// Why a credential presented nothing: the reason a note's line gives.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Cause {
+    /// The credential holds a byte no header value may carry (1.5.5's reason).
+    InvalidByte,
+    /// A caller's credential is not valid UTF-8.
+    NotUtf8,
+}
+
+/// The diagnostic a note raises for `cause`: the message, then the line's named values as
+/// ` name=value` (names and reasons only, never credential bytes). A caller credential that is not
+/// valid UTF-8 says so, in place of 1.5.5's reason (it need hold no control character).
+pub(crate) fn note_line(n: &Note, cause: Cause) -> (u32, u8, String) {
+    let (control, family) = match cause {
+        Cause::InvalidByte => ("ASCII control character", "e.g. a trailing newline"),
+        Cause::NotUtf8 => ("not valid UTF-8", "not valid UTF-8"),
+    };
     match n {
         Note::Header(header) => (
             diag::APIKEY_INVALID_BYTES,
             SEVERITY_WARN,
             format!(
-                "egress credential contains invalid header bytes (ASCII control character); \
-                 omitting auth header — upstream will reject with 401 header={header}"
+                "egress credential contains invalid header bytes ({control}); omitting auth \
+                 header — upstream will reject with 401 header={header}"
             ),
         ),
         Note::Bearer(protocol) => (
             diag::AUTH_INVALID_HEADER_BYTES,
             SEVERITY_WARN,
             format!(
-                "authorization credential contains invalid header bytes (ASCII control \
-                 character); omitting auth header — upstream will reject with 401 \
-                 protocol={protocol}"
+                "authorization credential contains invalid header bytes ({control}); omitting \
+                 auth header — upstream will reject with 401 protocol={protocol}"
             ),
         ),
         Note::Query(param) => (
             diag::APIKEY_INVALID_BYTES,
             SEVERITY_WARN,
             format!(
-                "egress credential contains invalid bytes (ASCII control character); omitting the \
-                 auth query parameter — upstream will reject with 401 param={param}"
+                "egress credential contains invalid bytes ({control}); omitting the auth query \
+                 parameter — upstream will reject with 401 param={param}"
             ),
         ),
         Note::Family(protocol, header) => (
             diag::CREDENTIAL_INVALID_BYTES,
             SEVERITY_WARN,
             format!(
-                "auth credential contains bytes invalid for an HTTP header value (e.g. a trailing \
-                 newline); omitting the credential header — upstream will return 401, check the \
-                 key configuration protocol={protocol} header={header}"
+                "auth credential contains bytes invalid for an HTTP header value ({family}); \
+                 omitting the credential header — upstream will return 401, check the key \
+                 configuration protocol={protocol} header={header}"
             ),
         ),
     }
 }
 
-/// Raise `note`'s diagnostic ([`note_line`]) in this call's reply.
-fn raise(out: &mut FieldsWriter<'_>, note: &Note) {
-    let (id, severity, text) = note_line(note);
+/// Raise `note`'s diagnostic for `cause` ([`note_line`]) in this call's reply.
+fn raise(out: &mut FieldsWriter<'_>, note: &Note, cause: Cause) {
+    let (id, severity, text) = note_line(note, cause);
     out.diag(id, severity, text);
 }
 
@@ -235,7 +248,7 @@ impl OutboundPlugin for Header {
                 }
 
                 if let Some(note) = b.own_note() {
-                    raise(out, note);
+                    raise(out, note, Cause::InvalidByte);
                 }
             }),
             CredentialMode::Passthrough => {
@@ -265,7 +278,7 @@ impl OutboundPlugin for Header {
                             }
                         }
                         if let Some(note) = b.passthrough_note(&lossy) {
-                            raise(out, &note);
+                            raise(out, &note, Cause::NotUtf8);
                         }
                         return;
                     }
@@ -276,7 +289,7 @@ impl OutboundPlugin for Header {
 
                     if !presented {
                         if let Some(note) = b.passthrough_note(caller) {
-                            raise(out, &note);
+                            raise(out, &note, Cause::InvalidByte);
                         }
                     }
                 })

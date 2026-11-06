@@ -460,13 +460,14 @@ const EXPECTED: &[&str] = &[
 /// The folds every build must hand the host: the INFO line of an own credential that opens
 /// unpresentable, each refusal's INFO line (`module = "header"`, its reason, never a credential:
 /// AUTH-STANDARD S5), and the bearer's WARN line on each request whose own or caller credential it
-/// could not present, naming the bound protocol (none bound here: empty).
+/// could not present, naming the bound protocol (none bound here: empty) and the reason (a control
+/// character, or a caller credential that is not valid UTF-8).
 const EXPECTED_FOLDS: &[&str] = &[
     "diag 4294967295 sev=0 busbar_auth_header::instance: header settings refused \
      module=\"header\" reason=\"not_object\"",
     "diag 4294967295 sev=0 busbar_auth_header::instance: header binding opened with a \
      credential it cannot present module=\"header\" style=\"bearer\" \
-     reason=\"unpresentable_credential\" header=\"\" protocol=\"\"",
+     reason=\"unpresentable_credential\" header=\"authorization\" protocol=\"\"",
     "diag 4294967295 sev=0 busbar_auth_header::instance: header binding refused \
      module=\"header\" style=\"sigv4\" reason=\"binding_refused\" refusal=settings: outbound \
      auth style `sigv4` is not served by this plugin",
@@ -477,8 +478,8 @@ const EXPECTED_FOLDS: &[&str] = &[
      character); omitting auth header — upstream will reject with 401 protocol=",
     "diag 1 sev=1 authorization credential contains invalid header bytes (ASCII control \
      character); omitting auth header — upstream will reject with 401 protocol=",
-    "diag 1 sev=1 authorization credential contains invalid header bytes (ASCII control \
-     character); omitting auth header — upstream will reject with 401 protocol=",
+    "diag 1 sev=1 authorization credential contains invalid header bytes (not valid UTF-8); \
+     omitting auth header — upstream will reject with 401 protocol=",
     "diag 4294967295 sev=0 busbar_auth_header::instance: header fields refused \
      module=\"header\" handle=999 reason=\"unknown_handle\"",
     "diag 4294967295 sev=0 busbar_auth_header::instance: header fields refused \

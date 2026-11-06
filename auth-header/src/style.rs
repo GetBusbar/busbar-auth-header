@@ -10,7 +10,7 @@ use busbar_contract::abi::sdk::auth_kit::json_error;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
-use crate::present::{trim_ows, Family, Field, Mode, Presentation, StaticScheme};
+use crate::present::{trim_ows, Family, Field, Mode, Presentation, StaticScheme, BEARER_HEADER};
 
 /// `authorization: Bearer <credential>`.
 pub const BEARER: &str = "bearer";
@@ -83,9 +83,11 @@ impl Refusal {
 /// diagnostic it raises.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Note {
-    /// A static header omitted for invalid bytes (`EGRESS_APIKEY_INVALID_BYTES`), naming the header.
+    /// A static header omitted for invalid bytes (`diag::APIKEY_INVALID_BYTES`, `BUSBAR-4013`),
+    /// naming the header.
     Header(String),
-    /// A bearer omitted for invalid bytes (`PROTO_AUTH_INVALID_HEADER_BYTES`), naming the protocol.
+    /// A bearer omitted for invalid bytes (`diag::AUTH_INVALID_HEADER_BYTES`, `BUSBAR-7087`),
+    /// naming the protocol.
     Bearer(String),
     /// A credential-family table's credential omitted for invalid bytes, naming the protocol, then
     /// the header.
@@ -98,11 +100,12 @@ pub enum Note {
 }
 
 impl Note {
-    /// The names the note carries, as `(header or parameter, protocol)`; empty where it names none.
+    /// The names the note carries, as `(header or parameter, protocol)`: a bearer's header is
+    /// [`BEARER_HEADER`]; the protocol is empty where the note names none.
     pub fn names(&self) -> (&str, &str) {
         match self {
             Note::Header(h) | Note::Query(h) => (h, ""),
-            Note::Bearer(p) => ("", p),
+            Note::Bearer(p) => (BEARER_HEADER, p),
             Note::Family(p, h) => (h, p),
         }
     }
@@ -334,7 +337,7 @@ fn unpresented(
     let field_name = p
         .header
         .clone()
-        .unwrap_or_else(|| "authorization".to_string());
+        .unwrap_or_else(|| BEARER_HEADER.to_string());
     if query {
         Note::Query(field_name)
     } else if !scheme.families.is_empty() {
@@ -351,7 +354,9 @@ fn unpresented(
 ///
 /// # Errors
 ///
-/// Every finding that refuses the binding, in 1.5.5's check order.
+/// The findings that refuse the binding, in 1.5.5's check order: settings that are not a JSON
+/// object, else every key a served style does not read, else the first other finding (the
+/// credential's encoding, then the style and the settings' values).
 pub fn open_binding(
     style: &str,
     credential: Option<&[u8]>,

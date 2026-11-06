@@ -84,10 +84,10 @@ busbar_contract::statement_extensions!(
     ]
 );
 
-/// What the plugin states: its name, version, concurrency, diagnostics and auth tail.
 /// JSON Schema for the lifecycle settings document, embedded in the signed Statement.
 const SETTINGS_SCHEMA: &[u8] = include_bytes!("../settings.schema.json");
 
+/// What the plugin states: its name, version, concurrency, diagnostics and auth tail.
 const STATEMENT: Statement = with_tail(
     Statement {
         settings_schema: busbar_contract::abi::mechanism::call::Blob::json(SETTINGS_SCHEMA),

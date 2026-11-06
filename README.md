@@ -29,7 +29,9 @@ the selected raw presentation explicitly sets `trim_start`. A credential contain
 and tab presents no auth field in either credential mode. The same byte and blank-credential
 policy applies to `query-key`; the host percent-encodes its presented query value. An own credential must be UTF-8; otherwise
 `open_outbound` fails with a credential refusal. A non-UTF-8 caller credential presents no field
-and raises the selected style's diagnostic. Legal non-ASCII UTF-8 bytes are retained without
+and raises the selected style's diagnostic with the reason `not valid UTF-8`; a credential holding
+a control character gives the reason `ASCII control character` (`e.g. a trailing newline` under a
+family table). Legal non-ASCII UTF-8 bytes are retained without
 normalization. A credential holding a byte no header value may carry also presents nothing; the
 request goes without an auth header, a WARN diagnostic is raised on each such request, and an
 unpresentable own credential is logged once at open and reported not ready.
@@ -82,7 +84,7 @@ cargo build --release -p busbar-auth-header-plugin
 BUSBAR_CHECKOUT=<busbar checkout at .busbar-ref> cargo test --workspace --locked
 ```
 
-The catalogue tests read the core diagnostic catalogue from `BUSBAR_CHECKOUT` (CI's plugin-ci
+The catalogue tests read the core diagnostic catalogue from `BUSBAR_CHECKOUT` (CI
 exports it) and fail when it is unset.
 
 ## License

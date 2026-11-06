@@ -63,7 +63,7 @@ fn every_declared_style_carries_the_caller_credential_flag_and_the_head_point() 
 /// each note raises the id of the code the Statement states at that index.
 #[test]
 fn each_diag_index_is_pinned_to_its_busbar_code() {
-    use crate::instance::{diag, note_line};
+    use crate::instance::{diag, note_line, Cause};
     use crate::style::Note;
     assert_eq!(DIAG_IDS.len(), 3);
     for (index, code) in [
@@ -77,7 +77,7 @@ fn each_diag_index_is_pinned_to_its_busbar_code() {
         assert_eq!(DIAG_IDS[i].len, code.len());
         assert!(std::ptr::eq(DIAG_IDS[i].ptr, DIAG_CODES[i].as_ptr()));
     }
-    let raised = |n: Note| DIAG_CODES[note_line(&n).0 as usize];
+    let raised = |n: Note| DIAG_CODES[note_line(&n, Cause::InvalidByte).0 as usize];
     assert_eq!(raised(Note::Header("h".into())), "BUSBAR-4013");
     assert_eq!(raised(Note::Query("p".into())), "BUSBAR-4013");
     assert_eq!(raised(Note::Bearer("x".into())), "BUSBAR-7087");

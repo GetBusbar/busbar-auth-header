@@ -118,7 +118,7 @@ fn an_unpresentable_own_credential_is_noted_on_each_request_not_at_open() {
         .with_binding(handle, |b| b.own_note().cloned())
         .flatten()
         .expect("the per-request note");
-    let (id, severity, text) = note_line(&note);
+    let (id, severity, text) = note_line(&note, Cause::InvalidByte);
     assert_eq!(id, diag::APIKEY_INVALID_BYTES);
     assert_eq!(severity, SEVERITY_WARN);
     assert!(text.ends_with("upstream will reject with 401 header=api-key"));
@@ -134,7 +134,7 @@ fn note_line_reports_each_note_in_its_own_line() {
         style::Note::Family("twin".to_string(), "x-api-key".to_string()),
     ]
     .iter()
-    .map(note_line)
+    .map(|n| note_line(n, Cause::InvalidByte))
     .collect();
     assert_eq!(lines[0].0, diag::APIKEY_INVALID_BYTES);
     assert_eq!(lines[1].0, diag::AUTH_INVALID_HEADER_BYTES);
@@ -191,9 +191,9 @@ fn a_callers_credential_is_presented_by_reference_with_the_owned_bytes() {
             })
             .flatten()
             .expect("a field");
-        let owned = h
-            .with_binding(handle, |b| b.passthrough(caller))
-            .expect("the binding");
+        // The owned presentation (`StaticScheme::present`) of the same bearer scheme.
+        let owned = crate::present::StaticScheme::uniform(crate::present::Presentation::BEARER)
+            .present(caller, crate::present::Mode::Passthrough);
         assert_eq!(by_ref.0, b"authorization");
         assert_eq!(by_ref.1, expected.as_bytes());
         assert_eq!(owned.len(), 1);

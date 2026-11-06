@@ -10,13 +10,24 @@ use super::*;
 use crate::test_support::Plain;
 
 impl Binding {
-    /// The fields a caller's credential presents — [`Mode::Passthrough`], as owned fields (what
-    /// [`Self::present_passthrough`] emits by reference).
+    /// The fields a caller's credential presents — [`Mode::Passthrough`]: what the production
+    /// [`Self::present_passthrough`] emits by reference, copied into owned fields.
     pub(crate) fn passthrough(&self, credential: &str) -> Vec<Field> {
-        if credential.is_empty() {
-            return Vec::new();
-        }
-        self.scheme.present(credential, Mode::Passthrough)
+        let mut fields = Vec::new();
+        let emitted = self.present_passthrough(credential, |name, value| {
+            fields.push((
+                String::from_utf8(name.to_vec()).expect("a header name is text"),
+                busbar_contract::abi::sdk::cred::Cred::captured(zeroize::Zeroizing::new(
+                    value.to_vec(),
+                )),
+            ));
+        });
+        assert_eq!(
+            emitted,
+            !fields.is_empty(),
+            "the answer matches what was emitted"
+        );
+        fields
     }
 }
 
@@ -169,6 +180,24 @@ fn passthrough_honours_the_family_table_too() {
     assert_eq!(
         binding.passthrough("other").plain(),
         vec![("x-api-key".to_string(), "other".to_string())]
+    );
+}
+
+/// Distinct own and passthrough presentations: the operator's credential takes `own`, the
+/// caller's takes `passthrough`, never the other's.
+#[test]
+fn own_and_passthrough_presentations_stay_distinct() {
+    let settings = r#"{"own":{"header":"x-own"},"passthrough":{"header":"x-caller"}}"#;
+    let binding = open(API_KEY, Some("op-key"), settings)
+        .0
+        .expect("the binding opens");
+    assert_eq!(
+        binding.own().plain(),
+        vec![("x-own".to_string(), "op-key".to_string())]
+    );
+    assert_eq!(
+        binding.passthrough("caller-key").plain(),
+        vec![("x-caller".to_string(), "caller-key".to_string())]
     );
 }
 
@@ -697,5 +726,23 @@ fn a_callers_unpresentable_credential_is_noted_by_its_passthrough_presentation()
     assert_eq!(
         split.passthrough_note("bad\ncaller"),
         Some(Note::Header("x-caller".to_string()))
+    );
+}
+
+/// A note names the field it omits: a bearer's is `authorization`, never an empty name.
+#[test]
+fn a_bearer_note_names_the_authorization_header() {
+    assert_eq!(
+        Note::Bearer("openai".to_string()).names(),
+        ("authorization", "openai")
+    );
+    assert_eq!(
+        Note::Header("x-api-key".to_string()).names(),
+        ("x-api-key", "")
+    );
+    assert_eq!(Note::Query("key".to_string()).names(), ("key", ""));
+    assert_eq!(
+        Note::Family("p".to_string(), "x-k".to_string()).names(),
+        ("x-k", "p")
     );
 }

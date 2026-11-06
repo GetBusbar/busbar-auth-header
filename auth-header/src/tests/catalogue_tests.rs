@@ -5,11 +5,11 @@
 
 const DECLARES_JSON: &str = include_str!("../../declares.json");
 
-/// The core catalogue at `BUSBAR_CHECKOUT` (busbar at `.busbar-ref`; plugin-ci exports it), as its
+/// The core catalogue at `BUSBAR_CHECKOUT` (busbar at `.busbar-ref`; CI exports it), as its
 /// path and the `code = N` rows it holds. Unset or unreadable fails the test: it never passes vacuously.
 fn core_catalogue() -> (std::path::PathBuf, std::collections::BTreeSet<u64>) {
     let busbar = std::env::var_os("BUSBAR_CHECKOUT").expect(
-        "BUSBAR_CHECKOUT is unset: the core catalogue is busbar's at .busbar-ref (plugin-ci exports it)",
+        "BUSBAR_CHECKOUT is unset: the core catalogue is busbar's at .busbar-ref (CI exports it)",
     );
     let path =
         std::path::PathBuf::from(busbar).join("crates/busbar-kernel/src/diagnostics/catalog.toml");
