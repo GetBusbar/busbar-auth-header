@@ -1172,6 +1172,63 @@ fn linked_and_dropped_use_distinct_actual_door_and_ops_addresses() {
     assert_ne!(ops, busbar_auth_header::door().ops() as usize);
 }
 
+/// Fresh real images complete the successful lifecycle and refuse use after CLOSE.
+#[test]
+fn linked_and_dropped_complete_successful_open_ready_close_lifecycle() {
+    for is_dropped in [false, true] {
+        let d = Dispatcher::new(DispatchConfig::default());
+        let folds = Arc::new(Folds::default());
+        let p = if is_dropped {
+            dropped(&folds, &d)
+        } else {
+            linked(&folds, &d)
+        };
+        let mut open: Frame<OpenIn, OpenOut> = Frame::new(z(), z());
+        open.input.head = in_head();
+        open.out.head = out_head();
+        open.input.settings = json("{}");
+        open.input.generation = 1;
+        assert_eq!(
+            one_header_crossing(&p, || p.call(life::OPEN, &mut open)).outcome,
+            Outcome::Ready
+        );
+        p.ready(&d, std::time::Duration::from_secs(5))
+            .expect("the real header image completes READY");
+        let (line, handle) = open_outbound(&p, "bearer", Some("lifecycle-key"), "{}");
+        assert_eq!(line, "open_outbound bearer Ready ");
+        assert_eq!(ready(&p, handle), "ready Ready 1");
+        assert_eq!(
+            fields(&p, handle, MODE_OWN, z(), (256, 4)),
+            "fields Ready  authorization: Bearer lifecycle-key [flags=1]"
+        );
+
+        let mut close = Frame::new(in_head(), out_head());
+        assert_eq!(
+            one_header_crossing(&p, || p.call(life::CLOSE, &mut close)).outcome,
+            Outcome::Ready
+        );
+        // The closed instance cannot present the credential it owned before CLOSE.
+        let mut closed: Frame<FieldsIn, FieldsOut> = Frame::new(z(), z());
+        closed.input.head = in_head();
+        closed.out.head = out_head();
+        closed.input.handle = handle;
+        closed.input.point = auth::POINT_HEAD;
+        closed.input.mode = MODE_OWN;
+        closed.input.request = facts();
+        let crossings = p.inner.crossings.load(std::sync::atomic::Ordering::Relaxed);
+        let resumes = p.inner.resumes.load(std::sync::atomic::Ordering::Relaxed);
+        assert_eq!(p.call(slot::FIELDS, &mut closed).outcome, Outcome::Fault);
+        assert_eq!(
+            p.inner.crossings.load(std::sync::atomic::Ordering::Relaxed),
+            crossings
+        );
+        assert_eq!(
+            p.inner.resumes.load(std::sync::atomic::Ordering::Relaxed),
+            resumes
+        );
+    }
+}
+
 #[test]
 fn outbound_statement_facts_cover_exactly_the_four_exercised_styles() {
     use busbar_contract::abi::mechanism::rendering::{read, read_auth_tail};
