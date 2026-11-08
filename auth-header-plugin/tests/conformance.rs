@@ -262,21 +262,18 @@ fn script(p: &Plugin<Auth>) -> Vec<String> {
         one_header_crossing(p, || p.call(life::OPEN, &mut o)).outcome
     ));
 
-    let before = p.inner.crossings.load(std::sync::atomic::Ordering::Relaxed);
-    let resumes = p.inner.resumes.load(std::sync::atomic::Ordering::Relaxed);
+    let before = p.test_invocations().0;
+    let resumes = p.test_invocations().1;
     p.ready(
-        &Dispatcher::new(DispatchConfig::default()),
+        &Dispatcher::new(
+            DispatchConfig::default(),
+            busbar_contract::services::test_caller_binding(),
+        ),
         std::time::Duration::from_secs(5),
     )
     .unwrap();
-    assert_eq!(
-        p.inner.crossings.load(std::sync::atomic::Ordering::Relaxed) - before,
-        u64::from(p.has_ready())
-    );
-    assert_eq!(
-        p.inner.resumes.load(std::sync::atomic::Ordering::Relaxed) - resumes,
-        0
-    );
+    assert_eq!(p.test_invocations().0 - before, u64::from(p.has_ready()));
+    assert_eq!(p.test_invocations().1 - resumes, 0);
 
     let (l, bearer) = open_outbound(p, "bearer", Some("sk-test-123"), "{}");
     t.push(l);
@@ -493,7 +490,10 @@ fn run(p: &Plugin<Auth>, folds: &Folds) -> (Vec<String>, Vec<String>) {
 
 #[test]
 fn compiled_in_and_dropped_in_answer_every_op_identically() {
-    let d = Dispatcher::new(DispatchConfig::default());
+    let d = Dispatcher::new(
+        DispatchConfig::default(),
+        busbar_contract::services::test_caller_binding(),
+    );
     let folds = Arc::new(Folds::default());
     let (linked_t, linked_f) = run(&linked(&folds, &d), &folds);
     assert_eq!(linked_t, EXPECTED, "the linked door");
@@ -574,7 +574,10 @@ extern "C" fn unflagged_door() -> &'static Door {
 /// holds the 1.6.0 rule: every credential header is flagged sensitive.
 #[test]
 fn red_an_unflagged_credential_header_is_not_the_pinned_bytes() {
-    let d = Dispatcher::new(DispatchConfig::default());
+    let d = Dispatcher::new(
+        DispatchConfig::default(),
+        busbar_contract::services::test_caller_binding(),
+    );
     let folds = Arc::new(Folds::default());
     let red = load_linked::<Auth>(&row(unflagged_door), bind(&folds, &d)).expect("the door loads");
     let t = script(&red);
@@ -602,7 +605,10 @@ extern "C" fn overrunning_door() -> &'static Door {
 
 #[test]
 fn red_a_writer_that_ignores_the_host_capacity_faults() {
-    let d = Dispatcher::new(DispatchConfig::default());
+    let d = Dispatcher::new(
+        DispatchConfig::default(),
+        busbar_contract::services::test_caller_binding(),
+    );
     let folds = Arc::new(Folds::default());
     let red =
         load_linked::<Auth>(&row(overrunning_door), bind(&folds, &d)).expect("the door loads");
@@ -648,7 +654,10 @@ fn cdylib() -> std::path::PathBuf {
 #[test]
 fn a_changed_statement_is_refused_linked_and_dropped() {
     use busbar_plugin_loader::dispatch::LoadError;
-    let d = Dispatcher::new(DispatchConfig::default());
+    let d = Dispatcher::new(
+        DispatchConfig::default(),
+        busbar_contract::services::test_caller_binding(),
+    );
     let folds = Arc::new(Folds::default());
     let statement = rendering_of(another_version_door).unwrap();
     busbar_contract::abi::mechanism::rendering::read(&statement)
@@ -670,10 +679,13 @@ fn a_changed_statement_is_refused_linked_and_dropped() {
 #[test]
 fn the_door_refuses_every_other_kind_linked_and_dropped() {
     use busbar_plugin_loader::dispatch::kinds::{
-        export::Export, hook::Hook, plane::Plane, secret::Secret, store::Store,
+        export::Export, hook::Hook, plane::Plane, secret::Secret, store_v4::StoreV4 as Store,
         transport::Transport,
     };
-    let d = Dispatcher::new(DispatchConfig::default());
+    let d = Dispatcher::new(
+        DispatchConfig::default(),
+        busbar_contract::services::test_caller_binding(),
+    );
     let folds = Arc::new(Folds::default());
     let row = row(busbar_auth_header::door);
     let path = cdylib();
@@ -786,7 +798,10 @@ extern "C" fn wrong_abi_door<const UP: bool>() -> &'static Door {
 
 #[test]
 fn another_kind_abi_is_refused() {
-    let d = Dispatcher::new(DispatchConfig::default());
+    let d = Dispatcher::new(
+        DispatchConfig::default(),
+        busbar_contract::services::test_caller_binding(),
+    );
     let folds = Arc::new(Folds::default());
     for door in [wrong_abi_door::<true> as DoorFn, wrong_abi_door::<false>] {
         let host = busbar_auth_header::door().kind_abi();
@@ -840,7 +855,10 @@ extern "C" fn failing_ready_door() -> &'static Door {
 }
 #[test]
 fn a_failing_ready_is_refused_once() {
-    let d = Dispatcher::new(DispatchConfig::default());
+    let d = Dispatcher::new(
+        DispatchConfig::default(),
+        busbar_contract::services::test_caller_binding(),
+    );
     let folds = Arc::new(Folds::default());
     let p = load_linked::<Auth>(&row(failing_ready_door), bind(&folds, &d)).unwrap();
     let mut open: Frame<OpenIn, OpenOut> = Frame::new(z(), z());
@@ -851,17 +869,11 @@ fn a_failing_ready_is_refused_once() {
         one_header_crossing(&p, || p.call(life::OPEN, &mut open)).outcome,
         Outcome::Ready
     );
-    let before = p.inner.crossings.load(std::sync::atomic::Ordering::Relaxed);
-    let resumes = p.inner.resumes.load(std::sync::atomic::Ordering::Relaxed);
+    let before = p.test_invocations().0;
+    let resumes = p.test_invocations().1;
     let refused = p.ready(&d, std::time::Duration::from_secs(5)).unwrap_err();
-    assert_eq!(
-        p.inner.crossings.load(std::sync::atomic::Ordering::Relaxed) - before,
-        1
-    );
-    assert_eq!(
-        p.inner.resumes.load(std::sync::atomic::Ordering::Relaxed) - resumes,
-        0
-    );
+    assert_eq!(p.test_invocations().0 - before, 1);
+    assert_eq!(p.test_invocations().1 - resumes, 0);
     assert!(
         refused
             == format!(
@@ -897,7 +909,10 @@ extern "C" fn another_version_door() -> &'static Door {
 }
 #[test]
 fn a_restated_version_does_not_match_the_honest_row() {
-    let d = Dispatcher::new(DispatchConfig::default());
+    let d = Dispatcher::new(
+        DispatchConfig::default(),
+        busbar_contract::services::test_caller_binding(),
+    );
     let folds = Arc::new(Folds::default());
     let row = LinkedRow {
         statement: rendering_of(busbar_auth_header::door).unwrap(),
@@ -914,9 +929,8 @@ fn one_header_crossing(
     p: &Plugin<Auth>,
     call: impl FnOnce() -> busbar_plugin_loader::dispatch::Called,
 ) -> busbar_plugin_loader::dispatch::Called {
-    use std::sync::atomic::Ordering;
-    let before = p.inner.crossings.load(Ordering::Relaxed);
-    let resumes = p.inner.resumes.load(Ordering::Relaxed);
+    let before = p.test_invocations().0;
+    let resumes = p.test_invocations().1;
     let result = call();
     assert_eq!(result.lease, 0, "header calls retain no output lease");
     if result.outcome == Outcome::Ready {
@@ -925,8 +939,8 @@ fn one_header_crossing(
             "successful header call has no error"
         );
     }
-    assert_eq!(p.inner.crossings.load(Ordering::Relaxed) - before, 1);
-    assert_eq!(p.inner.resumes.load(Ordering::Relaxed) - resumes, 0);
+    assert_eq!(p.test_invocations().0 - before, 1);
+    assert_eq!(p.test_invocations().1 - resumes, 0);
     result
 }
 
@@ -936,7 +950,10 @@ fn the_actual_header_instance_refuses_connections_without_a_table() {
     use busbar_contract::abi::host::service::{ServiceHead, ServiceOut};
     use busbar_contract::abi::mechanism::ticket::{CompletionHandle, Ticket};
     use busbar_plugin_loader::dispatch::conn_services::CONN_SLOTS;
-    let d = Dispatcher::new(DispatchConfig::default());
+    let d = Dispatcher::new(
+        DispatchConfig::default(),
+        busbar_contract::services::test_caller_binding(),
+    );
     let folds = Arc::new(Folds::default());
     let mut products = vec![linked(&folds, &d)];
     products.push(dropped(&folds, &d));
@@ -962,7 +979,11 @@ fn the_actual_header_instance_refuses_connections_without_a_table() {
             o.size = std::mem::size_of::<ServiceOut>() as u32;
             // SAFETY: the real instance context and stack-backed service frames live through this synchronous call.
             let result = unsafe {
-                CONN_SLOTS.establish.unwrap()(p.inner.ctx(), std::ptr::from_ref(&i).cast(), &mut o)
+                CONN_SLOTS.establish.unwrap()(
+                    p.test_host_context(),
+                    std::ptr::from_ref(&i).cast(),
+                    &mut o,
+                )
             };
             assert_eq!(result.outcome(), Outcome::Refused);
             // SAFETY: the host's error remains readable for this synchronous service answer.
@@ -1003,7 +1024,10 @@ fn each_declared_header_style_retains_the_original_outbound_cases() {
     ];
     for is_dropped in [false, true] {
         for (style, credential, settings, expected) in cases {
-            let d = Dispatcher::new(DispatchConfig::default());
+            let d = Dispatcher::new(
+                DispatchConfig::default(),
+                busbar_contract::services::test_caller_binding(),
+            );
             let folds = Arc::new(Folds::default());
             let p = if is_dropped {
                 dropped(&folds, &d)
@@ -1032,17 +1056,11 @@ fn each_declared_header_style_retains_the_original_outbound_cases() {
                 one_header_crossing(&p, || p.call(life::OPEN, &mut open)).outcome,
                 Outcome::Ready
             );
-            let before = p.inner.crossings.load(std::sync::atomic::Ordering::Relaxed);
-            let resumed = p.inner.resumes.load(std::sync::atomic::Ordering::Relaxed);
+            let before = p.test_invocations().0;
+            let resumed = p.test_invocations().1;
             p.ready(&d, std::time::Duration::from_secs(5)).unwrap();
-            assert_eq!(
-                p.inner.crossings.load(std::sync::atomic::Ordering::Relaxed) - before,
-                u64::from(p.has_ready())
-            );
-            assert_eq!(
-                p.inner.resumes.load(std::sync::atomic::Ordering::Relaxed),
-                resumed
-            );
+            assert_eq!(p.test_invocations().0 - before, u64::from(p.has_ready()));
+            assert_eq!(p.test_invocations().1, resumed);
             let (line, handle) = open_outbound(&p, style, Some(credential), settings);
             assert_eq!(line, format!("open_outbound {style} Ready "));
             for _ in 0..2 {
@@ -1083,17 +1101,11 @@ fn each_declared_header_style_retains_the_original_outbound_cases() {
             closed.input.point = auth::POINT_HEAD;
             closed.input.mode = MODE_OWN;
             closed.input.request = facts();
-            let before = p.inner.crossings.load(std::sync::atomic::Ordering::Relaxed);
-            let resumed = p.inner.resumes.load(std::sync::atomic::Ordering::Relaxed);
+            let before = p.test_invocations().0;
+            let resumed = p.test_invocations().1;
             assert_eq!(p.call(slot::FIELDS, &mut closed).outcome, Outcome::Fault);
-            assert_eq!(
-                p.inner.crossings.load(std::sync::atomic::Ordering::Relaxed),
-                before
-            );
-            assert_eq!(
-                p.inner.resumes.load(std::sync::atomic::Ordering::Relaxed),
-                resumed
-            );
+            assert_eq!(p.test_invocations().0, before);
+            assert_eq!(p.test_invocations().1, resumed);
         }
     }
 }
@@ -1112,7 +1124,10 @@ extern "C" fn wrong_layout_door<const ZERO: bool>() -> &'static Door {
 #[test]
 fn both_wrong_layout_fingerprints_are_refused() {
     use busbar_plugin_loader::dispatch::LoadError;
-    let d = Dispatcher::new(DispatchConfig::default());
+    let d = Dispatcher::new(
+        DispatchConfig::default(),
+        busbar_contract::services::test_caller_binding(),
+    );
     let folds = Arc::new(Folds::default());
     let host = busbar_auth_header::door().parts().layout;
     for door in [
@@ -1159,7 +1174,10 @@ fn both_wrong_layout_fingerprints_are_refused() {
 
 #[test]
 fn linked_and_dropped_use_distinct_actual_door_and_ops_addresses() {
-    let d = Dispatcher::new(DispatchConfig::default());
+    let d = Dispatcher::new(
+        DispatchConfig::default(),
+        busbar_contract::services::test_caller_binding(),
+    );
     let folds = Arc::new(Folds::default());
     let _linked = linked(&folds, &d);
     let _dropped = dropped(&folds, &d);
@@ -1177,7 +1195,10 @@ fn linked_and_dropped_use_distinct_actual_door_and_ops_addresses() {
 #[test]
 fn linked_and_dropped_complete_successful_open_ready_close_lifecycle() {
     for is_dropped in [false, true] {
-        let d = Dispatcher::new(DispatchConfig::default());
+        let d = Dispatcher::new(
+            DispatchConfig::default(),
+            busbar_contract::services::test_caller_binding(),
+        );
         let folds = Arc::new(Folds::default());
         let p = if is_dropped {
             dropped(&folds, &d)
@@ -1216,17 +1237,11 @@ fn linked_and_dropped_complete_successful_open_ready_close_lifecycle() {
         closed.input.point = auth::POINT_HEAD;
         closed.input.mode = MODE_OWN;
         closed.input.request = facts();
-        let crossings = p.inner.crossings.load(std::sync::atomic::Ordering::Relaxed);
-        let resumes = p.inner.resumes.load(std::sync::atomic::Ordering::Relaxed);
+        let crossings = p.test_invocations().0;
+        let resumes = p.test_invocations().1;
         assert_eq!(p.call(slot::FIELDS, &mut closed).outcome, Outcome::Fault);
-        assert_eq!(
-            p.inner.crossings.load(std::sync::atomic::Ordering::Relaxed),
-            crossings
-        );
-        assert_eq!(
-            p.inner.resumes.load(std::sync::atomic::Ordering::Relaxed),
-            resumes
-        );
+        assert_eq!(p.test_invocations().0, crossings);
+        assert_eq!(p.test_invocations().1, resumes);
     }
 }
 
@@ -1249,7 +1264,10 @@ fn outbound_statement_facts_cover_exactly_the_four_exercised_styles() {
         assert_eq!(style.points, auth::POINT_HEAD);
         assert_eq!(style.flags & auth::STYLE_NEEDS_HEADERS, 0);
     }
-    let d = Dispatcher::new(DispatchConfig::default());
+    let d = Dispatcher::new(
+        DispatchConfig::default(),
+        busbar_contract::services::test_caller_binding(),
+    );
     let folds = Arc::new(Folds::default());
     let linked = linked(&folds, &d);
     let dropped = dropped(&folds, &d);
@@ -1267,7 +1285,10 @@ fn outbound_statement_facts_cover_exactly_the_four_exercised_styles() {
 /// before, but says so in the plugin's log (an empty lent credential stays silent: nothing to report).
 #[test]
 fn a_passthrough_call_with_no_lent_caller_credential_is_logged() {
-    let d = Dispatcher::new(DispatchConfig::default());
+    let d = Dispatcher::new(
+        DispatchConfig::default(),
+        busbar_contract::services::test_caller_binding(),
+    );
     let folds = Arc::new(Folds::default());
     let p = linked(&folds, &d);
     let mut o: Frame<OpenIn, OpenOut> = Frame::new(z(), z());

@@ -201,7 +201,10 @@ fn assert_no_allocation_beyond_own(caller_allocs: u64, own_allocs: u64) {
 
 #[test]
 fn long_bearer_credentials_keep_the_wire_bytes_and_relative_allocation_contract() {
-    let dispatcher = Dispatcher::new(DispatchConfig::default());
+    let dispatcher = Dispatcher::new(
+        DispatchConfig::default(),
+        busbar_contract::services::test_caller_binding(),
+    );
     let plugin = plugin(&dispatcher);
     let own_key = "o".repeat(2048);
     let caller_key = "c".repeat(2048);
@@ -223,7 +226,10 @@ fn long_bearer_credentials_keep_the_wire_bytes_and_relative_allocation_contract(
 
 #[test]
 fn a_callers_credential_is_presented_with_no_allocation_beyond_the_own_modes() {
-    let d = Dispatcher::new(DispatchConfig::default());
+    let d = Dispatcher::new(
+        DispatchConfig::default(),
+        busbar_contract::services::test_caller_binding(),
+    );
     let p = plugin(&d);
     let own = open_bearer(&p, "sk-test-123");
     let caller = blob("caller-tok1", BLOB_OCTETS, BLOB_SECRET);

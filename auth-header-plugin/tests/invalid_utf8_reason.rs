@@ -154,7 +154,10 @@ fn cases(p: &Plugin<Auth>, reason: &str) -> Vec<(u64, String)> {
 
 #[test]
 fn a_caller_credential_that_is_not_utf8_is_reported_as_such() {
-    let d = Dispatcher::new(DispatchConfig::default());
+    let d = Dispatcher::new(
+        DispatchConfig::default(),
+        busbar_contract::services::test_caller_binding(),
+    );
     let texts = Arc::new(Texts::default());
     let p = plugin(&texts, &d);
     for (handle, want) in cases(&p, "not valid UTF-8") {
@@ -167,7 +170,10 @@ fn a_caller_credential_that_is_not_utf8_is_reported_as_such() {
 
 #[test]
 fn a_caller_credential_with_a_control_character_keeps_the_1_5_5_reason() {
-    let d = Dispatcher::new(DispatchConfig::default());
+    let d = Dispatcher::new(
+        DispatchConfig::default(),
+        busbar_contract::services::test_caller_binding(),
+    );
     let texts = Arc::new(Texts::default());
     let p = plugin(&texts, &d);
     let control = "(e.g. a trailing newline)";

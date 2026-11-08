@@ -183,7 +183,7 @@ impl OutboundPlugin for Header {
         style: &str,
         credential: Option<&[u8]>,
         settings: Option<&[u8]>,
-        _host: Option<&Host>,
+        _host: Option<&Host<busbar_contract::plugin::markers::AuthKind>>,
         _diags: &mut Diags,
     ) -> Result<u64, OpenRefusal> {
         let opened = style::open_binding(style, credential, settings);
@@ -237,7 +237,7 @@ impl OutboundPlugin for Header {
         &self,
         request: &FieldsView<'_>,
         out: &mut FieldsWriter<'_>,
-        _op: &Op<'_>,
+        _op: &Op<'_, busbar_contract::plugin::markers::AuthKind>,
     ) -> Poll<FieldsAnswer> {
         let handle = request.handle();
         let answered = match request.mode() {
