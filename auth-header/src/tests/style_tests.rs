@@ -582,16 +582,8 @@ fn framing_and_routing_fields_are_not_credential_carriers_in_any_presentation() 
         );
     }
     assert_eq!(
-        own(open(
-            QUERY_KEY,
-            Some("safe-key"),
-            r#"{"param":"Host"}"#
-        )
-        .0),
-        [(
-            "Host".to_string(),
-            "safe-key".to_string()
-        )]
+        own(open(QUERY_KEY, Some("safe-key"), r#"{"param":"Host"}"#).0),
+        [("Host".to_string(), "safe-key".to_string())]
     );
 }
 
