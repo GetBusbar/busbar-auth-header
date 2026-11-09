@@ -958,38 +958,40 @@ fn the_actual_header_instance_refuses_connections_without_a_table() {
     let mut products = vec![linked(&folds, &d)];
     products.push(dropped(&folds, &d));
     for p in products {
-        for need in [0, 1, u32::MAX] {
-            let i = EstablishIn {
-                head: ServiceHead {
-                    size: std::mem::size_of::<EstablishIn>() as u32,
-                    op: service::ESTABLISH,
-                    handle: CompletionHandle {
-                        ticket: Ticket::NONE,
-                        seq: 0,
-                        _reserved: 0,
+        p.test_in_host_operation(|| {
+            for need in [0, 1, u32::MAX] {
+                let i = EstablishIn {
+                    head: ServiceHead {
+                        size: std::mem::size_of::<EstablishIn>() as u32,
+                        op: service::ESTABLISH,
+                        handle: CompletionHandle {
+                            ticket: Ticket::NONE,
+                            seq: 0,
+                            _reserved: 0,
+                        },
                     },
-                },
-                need,
-                timeout_ms: 5000,
-                target: s("127.0.0.1:8080"),
-                within: z(),
-                member: z(),
-            };
-            let mut o: ServiceOut = z();
-            o.size = std::mem::size_of::<ServiceOut>() as u32;
-            // SAFETY: the real instance context and stack-backed service frames live through this synchronous call.
-            let result = unsafe {
-                CONN_SLOTS.establish.unwrap()(
-                    p.test_host_context(),
-                    std::ptr::from_ref(&i).cast(),
-                    &mut o,
-                )
-            };
-            assert_eq!(result.outcome(), Outcome::Refused);
-            // SAFETY: the host's error remains readable for this synchronous service answer.
-            let text = unsafe { std::slice::from_raw_parts(o.error.ptr, o.error.len) };
-            assert_eq!(text, b"this plugin was handed no connection table");
-        }
+                    need,
+                    timeout_ms: 5000,
+                    target: s("127.0.0.1:8080"),
+                    within: z(),
+                    member: z(),
+                };
+                let mut o: ServiceOut = z();
+                o.size = std::mem::size_of::<ServiceOut>() as u32;
+                // SAFETY: the real instance context and stack-backed service frames live through this synchronous call.
+                let result = unsafe {
+                    CONN_SLOTS.establish.unwrap()(
+                        p.test_host_context(),
+                        std::ptr::from_ref(&i).cast(),
+                        &mut o,
+                    )
+                };
+                assert_eq!(result.outcome(), Outcome::Refused);
+                // SAFETY: the host's error remains readable for this synchronous service answer.
+                let text = unsafe { std::slice::from_raw_parts(o.error.ptr, o.error.len) };
+                assert_eq!(text, b"this plugin was handed no connection table");
+            }
+        });
     }
 }
 
