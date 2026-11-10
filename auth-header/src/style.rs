@@ -55,7 +55,7 @@ pub(crate) fn known_key(key: &str) -> bool {
 fn unknown_keys(m: &Map<String, Value>, keys: &[&str]) -> Vec<Refusal> {
     m.keys()
         .filter(|k| !keys.contains(&k.as_str()) && !PROVIDER_KEYS.contains(&k.as_str()))
-        .map(|k| Refusal::Settings(format!("unknown key `{k}`")))
+        .map(|k| Refusal::Settings(format!("unknown key `{}`", k.escape_default())))
         .collect()
 }
 

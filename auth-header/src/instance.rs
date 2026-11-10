@@ -36,8 +36,9 @@ pub(crate) mod diag {
 
 /// The flags every header field this plugin writes carries: [`FIELD_SENSITIVE`], so an h2 encoder
 /// sends the credential never-indexed and it never enters a shared HPACK table. A query parameter
-/// carries [`FIELD_QUERY`] alone: the flag governs header indexing only (an own query credential
-/// also reads [`FIELD_SENSITIVE`] because `push_sealed` sets it on every sealed field).
+/// carries [`FIELD_QUERY`] as well; an own query credential also reads [`FIELD_SENSITIVE`] because
+/// `push_sealed` sets it on every sealed field, and a passthrough query credential sets it
+/// explicitly (the caller's credential is equally sensitive in both modes).
 const FIELD_FLAGS: u32 = FIELD_SENSITIVE;
 
 /// The instance-level settings grammar, judged alike at `validate`, `open` and `refresh`.
@@ -54,7 +55,7 @@ fn settings(b: &[u8]) -> Result<(), LifecycleRefusal> {
     let unknown: Vec<String> = m
         .keys()
         .filter(|k| !style::known_key(k))
-        .map(|k| format!("settings.{k}: unknown key"))
+        .map(|k| format!("settings.{}: unknown key", k.escape_default()))
         .collect();
     if unknown.is_empty() {
         Ok(())
@@ -269,7 +270,7 @@ impl OutboundPlugin for Header {
                     }
                     if !raw.is_empty() && caller.is_empty() {
                         let mut lossy = zeroize::Zeroizing::new(String::with_capacity(
-                            raw.len().saturating_mul(3),
+                            raw.len().saturating_mul(3).min(4096),
                         ));
                         for chunk in raw.utf8_chunks() {
                             lossy.push_str(chunk.valid());
@@ -282,7 +283,11 @@ impl OutboundPlugin for Header {
                         }
                         return;
                     }
-                    let flags = if b.query() { FIELD_QUERY } else { FIELD_FLAGS };
+                    let flags = if b.query() {
+                        FIELD_QUERY | FIELD_FLAGS
+                    } else {
+                        FIELD_FLAGS
+                    };
                     let presented = b.present_passthrough(caller, |name, value| {
                         out.push(name, value, flags);
                     });

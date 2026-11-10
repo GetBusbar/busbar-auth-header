@@ -438,7 +438,7 @@ const EXPECTED: &[&str] = &[
     "open_outbound query-key Ready ",
     "fields Ready  key: gem-key [flags=3]",
     "fields Ready  api_key: gem-key [flags=3]",
-    "fields Ready  key: caller-tok [flags=2]",
+    "fields Ready  key: caller-tok [flags=3]",
     "ready Ready 1",
     "ready Ready 1",
     "ready Ready 1",
